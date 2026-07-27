@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+.venv/
+venv/
+
+# Local biometric samples and generated artifacts
+gesture_dataset/
+*.keras
+*.joblib
+auth_log.csv
+*_evaluation_report.json
+*_dataset_audit.json
+*_threshold.json

@@ -6,8 +6,10 @@ __pycache__/
 # 원본 영상 (약 1GB. GitHub 파일/저장소 용량 제한을 넘고, 인물이 식별되는 영상입니다)
 videos/
 
-# 랜드마크 중간 캐시 (16MB, 264개). videos/ 에서 재생성 가능하므로 제외.
+# 랜드마크 중간 캐시. videos/ 에서 재생성 가능하므로 제외.
 landmarks/
+# 파일명 기반으로 저장하던 구버전 캐시. 영상 이름이 바뀌어 재사용 불가.
+landmarks_old_flat/
 
 # dataset.npz(4.4MB)와 labels.csv 는 커밋합니다.
 # videos/ 를 올리지 않으므로, 이 둘이 없으면 README 의 수치를 재현할 수 없습니다.

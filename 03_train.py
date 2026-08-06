@@ -17,6 +17,7 @@ dataset.npz -> 두 가지 과제를 각각 학습/평가한다. 전체 실행 �
 """
 import argparse
 import csv
+import sys
 import warnings
 import numpy as np
 
@@ -108,6 +109,74 @@ def impostor_grouped_folds(yg, pg, seed=0):
     return folds
 
 
+def _split_list(items, k):
+    """리스트를 k 개 그룹으로 최대한 고르게 나눈다."""
+    n = len(items)
+    return [items[i * n // k:(i + 1) * n // k] for i in range(k)]
+
+
+def session_folds(yg, pg, sg, seed=0):
+    """
+    등록자의 '세션(촬영일)' 을 통째로 홀드아웃한다.
+
+    왜 필요한가:
+      impostor_grouped_folds 는 등록자 샘플을 무작위로 K등분하므로, 같은 날 찍은 영상이
+      학습과 평가에 함께 들어간다. 같은 조명/의상/카메라 위치가 그대로 재현되므로
+      FRR 이 실제보다 낙관적으로 나온다. 5일에 걸쳐 촬영한 이유가 이걸 없애기 위해서다.
+
+    폴드 k: test = (등록자의 세션 k 전체) + (타인 샘플의 1/K)
+    타인은 무작위 분할이므로 FAR 은 여전히 낙관적이다. 이 방식이 정직해지는 건 FRR 이다.
+    """
+    sg, pg = np.asarray(sg), np.asarray(pg)
+    pos = np.where(yg == 1)[0]
+    sessions = sorted(set(sg[pos]))
+    K = len(sessions)
+    if K < 2:
+        return None
+    neg = np.where(yg == 0)[0]
+    rng = np.random.RandomState(seed)
+    neg_folds = np.array_split(neg[rng.permutation(len(neg))], K)
+    all_idx = np.arange(len(yg))
+    folds = []
+    for k, s in enumerate(sessions):
+        te = np.concatenate([pos[sg[pos] == s], neg_folds[k]])
+        folds.append((np.setdiff1d(all_idx, te), te))
+    return folds
+
+
+def session_impostor_folds(yg, pg, sg):
+    """
+    등록자 세션과 타인 수행자를 '동시에' 홀드아웃한다. 가장 엄격한 평가.
+
+    폴드 k: test = (등록자 세션 그룹 k) + (타인 수행자 그룹 k 전원)
+            train = 나머지 세션의 등록자 + 나머지 타인 전원
+
+    FRR 은 '학습에 없던 날', FAR 은 '학습에 없던 사람' 에서 측정된다.
+    실사용 조건(등록 후 다른 날 인증, 처음 보는 공격자)에 가장 가까우므로
+    제안서 수치는 이 값으로 보고해야 방어할 수 있다.
+
+    등록자 세션이 1개뿐이면(=추가 촬영을 하지 않은 수행자) 폴드를 만들 수 없어 None.
+    """
+    sg, pg = np.asarray(sg), np.asarray(pg)
+    pos = np.where(yg == 1)[0]
+    sessions = sorted(set(sg[pos]))
+    imps = sorted(set(pg[yg == 0]))
+    K = min(len(sessions), len(imps))
+    if K < 2:
+        return None
+    sess_groups = _split_list(sessions, K)
+    imp_groups = _split_list(imps, K)
+    all_idx = np.arange(len(yg))
+    folds = []
+    for k in range(K):
+        te = np.concatenate([
+            pos[np.isin(sg[pos], sess_groups[k])],
+            np.where((yg == 0) & np.isin(pg, imp_groups[k]))[0],
+        ])
+        folds.append((np.setdiff1d(all_idx, te), te))
+    return folds
+
+
 def eval_scheme(Xg, yg, cv, n_pos, n_neg):
     """CV 하나에 대해 모델 3종을 평가하고 (모델명, EER, AUC, FAR, FRR) 목록을 돌려준다."""
     out = []
@@ -125,27 +194,35 @@ def eval_scheme(Xg, yg, cv, n_pos, n_neg):
     return out
 
 
-def task_b_verification(X, gesture, performer, owners):
+SCHEME_ORDER = ["혼합", "타인분리", "세션분리", "이중분리"]
+
+
+def task_b_verification(X, gesture, performer, owners, session=None):
     print("\n" + "=" * 62)
     print("과제 B) 본인 인증 (제스처별 본인 vs 타인)")
     print("=" * 62)
-    print("교차검증 두 방식을 나란히 측정한다.")
+    print("교차검증 네 방식을 나란히 측정한다. 아래로 갈수록 엄격하다.")
     print("  [혼합]     StratifiedKFold. 같은 타인이 학습/평가에 모두 등장 -> FAR 낙관적")
-    print("  [타인분리] 타인을 수행자 단위로 홀드아웃 -> '처음 보는 사람'을 거부하는지 측정")
+    print("  [타인분리] 타인을 수행자 단위로 홀드아웃 -> FAR 정직, FRR 은 여전히 같은 세션")
+    print("  [세션분리] 등록자 세션을 홀드아웃      -> FRR 정직('다른 날'), FAR 낙관적")
+    print("  [이중분리] 세션 + 타인 동시 홀드아웃   -> 둘 다 정직. 실사용에 가장 가까움")
 
     performer = np.array(performer)
+    session = np.array(session) if session is not None else None
     rows = []
     for g in sorted(set(gesture)):
         owner = owners.get(g)
         if owner is None:
-            print(f"\n[{g}] owners.csv 에 등록자 정보 없음 -> 건너뜀")
+            print(f"\n[{g}] 등록자 정보 없음 -> 건너뜀")
             continue
         m = np.array([x == g for x in gesture])
         Xg, pg = X[m], performer[m]
+        sg = session[m] if session is not None else None
         yg = np.array([1 if p == owner else 0 for p in pg])
         n_pos, n_neg = int(yg.sum()), int((1 - yg).sum())
+        n_sess = len(set(sg[yg == 1])) if sg is not None else 0
         print(f"\n[{g}] 등록자={owner}  본인 {n_pos}개 / 타인 {n_neg}개"
-              f"  (타인 수행자 {len(set(pg[yg == 0]))}명)")
+              f"  (타인 수행자 {len(set(pg[yg == 0]))}명, 등록자 세션 {n_sess}개)")
         if n_pos < 4 or n_neg < 4:
             print("  샘플이 너무 적어 평가 생략")
             continue
@@ -157,6 +234,14 @@ def task_b_verification(X, gesture, performer, owners):
             print("  타인 수행자가 부족해 [타인분리] 생략")
         else:
             schemes.append(("타인분리", folds))
+        if sg is not None:
+            for label, fn in (("세션분리", session_folds), ("이중분리", session_impostor_folds)):
+                f = fn(yg, pg, sg)
+                if f is None:
+                    print(f"  등록자 세션이 {n_sess}개뿐이라 [{label}] 생략"
+                          f" -> 추가 촬영 없이는 이 수치를 낼 수 없습니다")
+                else:
+                    schemes.append((label, f))
 
         best = {}
         for sname, cv in schemes:
@@ -164,33 +249,42 @@ def task_b_verification(X, gesture, performer, owners):
                 print(f"  [{sname:<5}] {name:8s} AUC={roc:.3f}  EER={eer:.3f}  "
                       f"FAR={far:.3f} FRR={frr:.3f}")
                 if sname not in best or eer < best[sname][1]:
-                    best[sname] = (name, eer, roc)
+                    best[sname] = (name, eer, roc, far, frr)
         rows.append((g, owner, best))
 
     if not rows:
         return
+    used = [s for s in SCHEME_ORDER if any(s in b for _, _, b in rows)]
+
     print("\n" + "-" * 62)
-    print("요약 (제스처별, 각 CV 방식의 최적 모델)")
-    print(f"{'제스처':<11}{'등록자':<9}{'혼합: 모델':<13}{'EER':>7}"
-          f"   {'타인분리: 모델':<15}{'EER':>7}")
+    print("요약: 제스처별 최적 EER (낮을수록 좋음)")
+    print(f"{'제스처':<8}{'등록자':<8}" + "".join(f"{s:>12}" for s in used))
     for g, o, b in rows:
-        mix = b.get("혼합")
-        sep = b.get("타인분리")
-        line = f"{g:<11}{o:<9}{mix[0]:<13}{mix[1]:>7.3f}   "
-        line += f"{sep[0]:<15}{sep[1]:>7.3f}" if sep else f"{'-':<15}{'-':>7}"
+        line = f"{g:<8}{o:<8}"
+        for s in used:
+            line += f"{b[s][1]:>12.3f}" if s in b else f"{'-':>12}"
         print(line)
 
-    for sname in ("혼합", "타인분리"):
-        vals = [b[sname][1] for _, _, b in rows if sname in b]
+    line = f"{'평균':<8}{'':<8}"
+    for s in used:
+        vals = [b[s][1] for _, _, b in rows if s in b]
+        line += f"{np.mean(vals):>12.3f}" if vals else f"{'-':>12}"
+    print(line)
+
+    print("\n정확도 환산 (1 - EER):")
+    for s in used:
+        vals = [b[s][1] for _, _, b in rows if s in b]
+        n_missing = len(rows) - len(vals)
+        note = f"  (제스처 {n_missing}개 측정 불가)" if n_missing else ""
         if vals:
-            mean_eer = float(np.mean(vals))
-            print(f"\n[{sname}] 평균 EER = {mean_eer:.3f}"
-                  f"  ->  '정확도' 환산 약 {1 - mean_eer:.1%}")
-    print("\n제안서의 '인식 정확도 90% 이상' 은 [타인분리] 수치로 보고해야 방어 가능합니다.")
-    print("([혼합] 은 같은 타인을 외울 수 있어 FAR 이 실제보다 낮게 나옵니다)")
+            print(f"  [{s}] {1 - float(np.mean(vals)):.1%}{note}")
+
+    print("\n제안서의 '인식 정확도 90% 이상' 은 [이중분리] 수치로 보고해야 방어 가능합니다.")
+    print("나머지 셋은 각각 FAR 또는 FRR 이 낙관적으로 측정됩니다.")
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")   # 윈도우 cp949 콘솔에서 한글 깨짐 방지
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="dataset.npz")
     ap.add_argument("--owners", help="CSV: gesture,owner")
@@ -198,26 +292,45 @@ def main():
 
     z = np.load(a.data, allow_pickle=True)
     X, gesture, performer = z["X"], list(z["gesture"]), list(z["performer"])
-    print(f"데이터 {X.shape[0]}개, 특징 {X.shape[1]}차원\n")
+    session = list(z["session"]) if "session" in z.files else None
+    role = list(z["role"]) if "role" in z.files else None
+    print(f"데이터 {X.shape[0]}개, 특징 {X.shape[1]}차원")
+    if "canonical_hand" in z.files:
+        print(f"좌우 정규화: {'켬' if bool(z['canonical_hand']) else '끔'}")
+    if session is None:
+        print("경고: dataset.npz 에 session 이 없습니다 -> 세션분리 평가 생략"
+              " (02_build_features.py 를 다시 실행하세요)")
+    print()
 
     task_a_gesture(X, gesture, performer)
 
     owners = {}
-    if a.owners:
+    if role is not None:
+        # role 은 데이터와 같은 labels.csv 에서 왔으므로 owners.csv 보다 신뢰할 수 있다
+        cand = {}
+        for g, p, r in zip(gesture, performer, role):
+            if r == "own":
+                cand.setdefault(g, set()).add(p)
+        for g, who in cand.items():
+            if len(who) == 1:
+                owners[g] = next(iter(who))
+            else:
+                print(f"경고: {g} 의 등록자가 {sorted(who)} 로 여러 명입니다 -> 건너뜀")
+    elif a.owners:
         with open(a.owners, encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
                 owners[row["gesture"].strip()] = row["owner"].strip()
     else:
-        # owners.csv 가 없으면 '해당 제스처를 가장 많이 수행한 사람'을 등록자로 추정
+        # 라벨이 없으면 '해당 제스처를 가장 많이 수행한 사람'을 등록자로 추정
         for g in set(gesture):
             cnt = {}
             for gg, pp in zip(gesture, performer):
                 if gg == g:
                     cnt[pp] = cnt.get(pp, 0) + 1
             owners[g] = max(cnt, key=cnt.get)
-        print("\n(owners.csv 미지정 -> 최다 수행자를 등록자로 자동 추정)")
+        print("\n(등록자 정보 없음 -> 최다 수행자를 등록자로 자동 추정)")
 
-    task_b_verification(X, gesture, performer, owners)
+    task_b_verification(X, gesture, performer, owners, session)
 
 
 if __name__ == "__main__":

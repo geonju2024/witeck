@@ -11,6 +11,7 @@
 import argparse
 import os
 import glob
+import sys
 import time
 import numpy as np
 
@@ -45,14 +46,23 @@ def read_frames(path, max_frames=300):
 
 
 def extract_one(args):
-    video_path, out_dir = args
+    video_path, out_dir, videos_root = args
     import cv2
     import mediapipe as mp
 
-    stem = os.path.splitext(os.path.basename(video_path))[0]
-    out_path = os.path.join(out_dir, stem + ".npz")
+    # 출력 경로는 videos/ 하위 구조를 그대로 미러링한다.
+    #   videos/G1/P01/20260725/G1_P01_20260725_own_001.mp4
+    #   -> landmarks/G1/P01/20260725/G1_P01_20260725_own_001.npz
+    #
+    # 파일명(basename)만으로 키를 잡으면 안 된다. 세션 폴더가 다른데 파일명이 같은
+    # 영상이 실제로 존재했고(P03 의 20260805 촬영분), 그때 '이미 있으면 skip' 규칙에
+    # 걸려 25개가 조용히 유실됐다. 에러가 안 나서 알아채기 어렵다.
+    rel = os.path.relpath(video_path, videos_root)
+    stem = os.path.splitext(rel)[0].replace(os.sep, "/")
+    out_path = os.path.join(out_dir, os.path.splitext(rel)[0] + ".npz")
     if os.path.exists(out_path):
         return stem, "cached", 0.0
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     t0 = time.time()
     frames = read_frames(video_path)
@@ -105,13 +115,15 @@ def extract_one(args):
     np.savez_compressed(out_path,
                         hand=hand, hand_valid=hand_valid, handedness=handedness,
                         pose=pose, pose_valid=pose_valid,
-                        width=W, height=H, n_frames=T)
+                        width=W, height=H, n_frames=T,
+                        relative_path=stem + os.path.splitext(rel)[1])
 
     rate = hand_valid.max(axis=1).mean()
     return stem, f"T={T} hand={rate:.0%} pose={pose_valid.mean():.0%}", time.time() - t0
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")   # 윈도우 cp949 콘솔에서 한글 깨짐 방지
     ap = argparse.ArgumentParser()
     ap.add_argument("--videos", required=True, help="영상 폴더 (하위 폴더까지 재귀 탐색)")
     ap.add_argument("--out", default="./landmarks")
@@ -124,7 +136,7 @@ def main():
                     for f in glob.glob(os.path.join(a.videos, "**", f"*.{e}"), recursive=True)})
     print(f"영상 {len(files)}개 발견, workers={a.workers}")
 
-    jobs = [(f, a.out) for f in files]
+    jobs = [(f, a.out, a.videos) for f in files]
     t0 = time.time()
     if a.workers > 1:
         # MediaPipe 그래프는 프로세스마다 새로 만들어야 안전하다 (스레드 공유 금지)

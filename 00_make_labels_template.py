@@ -6,6 +6,8 @@ import re
 import sys
 from pathlib import Path
 
+import paths
+
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
 
@@ -220,15 +222,15 @@ def main() -> None:
     parser.add_argument(
         "--videos",
         type=Path,
-        required=True,
-        help="Video root directory.",
+        default=paths.VIDEOS_DIR,
+        help=f"Video root directory. (기본값: {paths.VIDEOS_DIR})",
     )
 
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("labels.csv"),
-        help="Output CSV path.",
+        default=paths.LABELS_CSV,
+        help=f"Output CSV path. (기본값: {paths.LABELS_CSV})",
     )
 
     parser.add_argument(
@@ -251,9 +253,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    videos_dir = paths.assert_external(args.videos, "영상")
+    output_path = paths.assert_external(args.out, "labels.csv")
+    print(f"영상   : {videos_dir}")
+    print(f"출력   : {output_path}\n")
+
     make_labels(
-        videos_dir=args.videos,
-        output_path=args.out,
+        videos_dir=videos_dir,
+        output_path=output_path,
         default_device=args.device,
         default_location=args.location,
         default_lighting=args.lighting,

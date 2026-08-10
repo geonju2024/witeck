@@ -85,15 +85,27 @@ G6로 오분류), G4_황혜민은 recall 0.255로 특히 약합니다. 제스처
 
 ### 재현 방법
 
+모든 경로는 [paths.py](paths.py)가 정합니다. 데이터는 Google Drive 공유 드라이브
+`WITECH/` 아래에 있고, 이 저장소에는 코드만 둡니다. 그래서 인자 없이 실행합니다.
+
 ```bash
-python 00_make_labels_template.py --videos ./videos --out labels.csv
-python 01_extract_landmarks.py --videos ./videos --out ./landmarks --workers 4
-python 02_build_features.py --landmarks ./landmarks --labels labels.csv --out dataset.npz
-python 03_train.py --data dataset.npz --owners owners.csv
+python paths.py                  # 어떤 경로를 쓰는지 먼저 확인
+python 00_make_labels_template.py # WITECH/videos -> derived/labels.csv
+python 01_extract_landmarks.py    # -> derived/landmarks/   (유일하게 느린 단계)
+python 02_build_features.py       # -> derived/dataset.npz
+python 03_train.py                # 고전 모델 (LogReg/SVM/RF)
+python 04_train_1dcnn.py          # 1D CNN
 ```
 
-> `labels.csv`는 **영상을 `videos/` 에 넣은 뒤에** 생성해야 합니다. 순서가 뒤바뀌면
-> 0행 템플릿이 만들어지고 2단계에서 전 샘플이 제외됩니다.
+경로를 옮겼다면 `set WITECH_ROOT=<폴더>` 로 덮어쓸 수 있습니다.
+
+> `labels.csv`는 **영상을 `WITECH/videos/` 에 넣은 뒤에** 생성해야 합니다. 순서가
+> 뒤바뀌면 0행 템플릿이 만들어지고 2단계에서 전 샘플이 제외됩니다.
+>
+> 2026-08-08 이전 데이터(옛 `dataset.npz`, `labels.csv`, `owners.csv`, `meta/`,
+> 실행 로그, `RESULTS_1DCNN.md`)는 `WITECH/archive/2026-08-08_local/` 로 옮겼습니다.
+> 파이프라인은 쓰지 않습니다. 이 저장소 안을 가리키는 데이터 경로를 지정하면
+> `paths.assert_external()` 이 즉시 중단시킵니다.
 >
 > `owners.csv`를 생략하면 "최다 수행자"로 등록자를 추정하는데, 제스처당 5명이 거의
 > 균등하게 수행한 이 데이터에서는 사실상 임의 선택이 되어 **틀립니다**
@@ -242,17 +254,17 @@ videos/
 ### 파이프라인
 
 ```bash
-# 0) 라벨 템플릿 생성 -> gesture, performer 열을 채우세요 (mtime 열이 순서 복원에 도움)
-python 00_make_labels_template.py --videos ./videos --out labels.csv
+# 0) 라벨 생성 (파일명에서 gesture/performer/session/role 을 읽는다)
+python 00_make_labels_template.py
 
-# 1) 랜드마크 추출 (유일하게 느린 단계, 220개에 약 10~20분. 캐시되므로 1회만)
-python 01_extract_landmarks.py --videos ./videos --out ./landmarks --workers 4
+# 1) 랜드마크 추출 (유일하게 느린 단계, 586개에 약 20~40분. 캐시되므로 1회만)
+python 01_extract_landmarks.py --workers 4
 
 # 2) 특징 생성 (수 초)
-python 02_build_features.py --landmarks ./landmarks --labels labels.csv --out dataset.npz
+python 02_build_features.py
 
 # 3) 학습 + 평가 (수 초)
-python 03_train.py --data dataset.npz --owners owners.csv
+python 03_train.py
 ```
 
 `owners.csv`:

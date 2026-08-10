@@ -1,7 +1,7 @@
 """동영상 회전 메타데이터 스캔.
 
 ffprobe 없이 MP4/MOV 컨테이너의 박스를 직접 파싱해서
-해상도 / fps / 프레임수 / 회전각을 meta/rotation_scan.csv 로 저장한다.
+해상도 / fps / 프레임수 / 회전각을 derived/meta/rotation_scan.csv 로 저장한다.
 
 회전각은 trak > tkhd 의 3x3 display matrix 에서 계산한다.
 (ffprobe 의 stream_side_data rotation 과 같은 값)
@@ -15,6 +15,8 @@ import math
 import struct
 import sys
 from pathlib import Path
+
+import paths
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".3gp"}
 
@@ -150,7 +152,7 @@ def probe(path):
 
 
 def main():
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else "videos")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else paths.VIDEOS_DIR
     if not root.is_dir():
         sys.exit(f"디렉터리를 찾을 수 없음: {root}")
 
@@ -167,7 +169,7 @@ def main():
                          "nb_frames": "", "rotation": "", "display_w": "",
                          "display_h": "", "error": f"{type(e).__name__}: {e}"})
 
-    out = Path("meta/rotation_scan.csv")
+    out = paths.DERIVED_DIR / "meta" / "rotation_scan.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

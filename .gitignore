@@ -11,6 +11,12 @@ landmarks/
 # 파일명 기반으로 저장하던 구버전 캐시. 영상 이름이 바뀌어 재사용 불가.
 landmarks_old_flat/
 
-# dataset.npz(4.4MB)와 labels.csv 는 커밋합니다.
-# videos/ 를 올리지 않으므로, 이 둘이 없으면 README 의 수치를 재현할 수 없습니다.
-# 공개 저장소로 전환할 경우 실명/생체 데이터가 포함된다는 점을 다시 검토하세요.
+# 데이터는 전부 Google Drive 공유 드라이브(WITECH)에 둡니다. 경로는 paths.py 참고.
+#   WITECH/videos/           원본 영상
+#   WITECH/derived/          labels.csv, landmarks/, dataset.npz, runs/
+# 이 저장소에는 파이썬 코드만 커밋합니다.
+
+# 아래 둘은 WITECH/archive/2026-08-08_local/ 로 옮겼습니다.
+# 다시 생기더라도 커밋되지 않도록 남겨 둡니다.
+old_dataset/
+runs/

@@ -12,8 +12,11 @@
   3) 시간축 리샘플: 프레임 수(55~79, fps도 24/30 혼재)를 T=32로 통일.
   4) Pose를 보조 특징으로 추가. Pose는 100% 가까이 잡히므로 손이 안 잡히는 구간의 보험이다.
 
+경로는 paths.py 가 정한다(공유 드라이브 WITECH). 인자 없이 실행하면
+WITECH/derived 의 landmarks/ + labels.csv -> WITECH/derived/dataset.npz 로 동작한다.
+
 사용법:
-    python 02_build_features.py --landmarks ./landmarks --labels labels.csv --out dataset.npz
+    python 02_build_features.py
 """
 # labels.csv 의 relative_path 를 그대로 키로 쓴다. 파일명(basename)만으로 맞추면
 # 세션 폴더가 다른 동명 파일이 서로를 덮어쓴다.
@@ -21,6 +24,8 @@ import argparse
 import os
 import sys
 import numpy as np
+
+import paths
 
 T_OUT = 32          # 리샘플 후 프레임 수
 WRIST, IDX_MCP, MID_MCP, PINKY_MCP = 0, 5, 9, 17
@@ -203,10 +208,13 @@ def features_from_npz(path, canonical_hand=True):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")   # 윈도우 cp949 콘솔에서 한글 깨짐 방지
     ap = argparse.ArgumentParser()
-    ap.add_argument("--landmarks", required=True)
-    ap.add_argument("--labels", required=True,
-                    help="CSV: relative_path,gesture,performer,session,role (헤더 포함)")
-    ap.add_argument("--out", default="dataset.npz")
+    ap.add_argument("--landmarks", default=str(paths.LANDMARKS_DIR),
+                    help=f"랜드마크 캐시 폴더. 기본값: {paths.LANDMARKS_DIR}")
+    ap.add_argument("--labels", default=str(paths.LABELS_CSV),
+                    help="CSV: relative_path,gesture,performer,session,role (헤더 포함). "
+                         f"기본값: {paths.LABELS_CSV}")
+    ap.add_argument("--out", default=str(paths.DATASET_NPZ),
+                    help=f"출력 dataset.npz. 기본값: {paths.DATASET_NPZ}")
     ap.add_argument("--min-det", type=float, default=0.15,
                     help="손 검출률이 이 값 미만인 영상은 제외")
     ap.add_argument("--keep-hand-side", action="store_true",
@@ -214,9 +222,17 @@ def main():
                          "기본값은 정규화 켬. 비교 실험용")
     a = ap.parse_args()
 
+    landmarks_dir = str(paths.assert_external(a.landmarks, "랜드마크 캐시"))
+    labels_path = str(paths.assert_external(a.labels, "labels.csv"))
+    out_path = str(paths.assert_external(a.out, "dataset.npz"))
+    print(f"랜드마크: {landmarks_dir}")
+    print(f"라벨    : {labels_path}")
+    print(f"출력    : {out_path}\n")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
     import csv
     meta = {}
-    with open(a.labels, encoding="utf-8-sig", newline="") as f:
+    with open(labels_path, encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             rel = row["relative_path"].strip().replace("\\", "/")
             meta[rel] = row
@@ -225,7 +241,7 @@ def main():
     # 제외 목록에 남는다.
     X, gestures, performers, sessions, roles, hands, names, dropped = [], [], [], [], [], [], [], []
     for rel, row in sorted(meta.items()):
-        path = os.path.join(a.landmarks, os.path.splitext(rel)[0] + ".npz")
+        path = os.path.join(landmarks_dir, os.path.splitext(rel)[0] + ".npz")
         if not os.path.exists(path):
             dropped.append((rel, "랜드마크 npz 없음 (01번을 먼저 실행)"))
             continue
@@ -259,7 +275,7 @@ def main():
         raise SystemExit(1)
 
     X = np.stack(X)
-    np.savez_compressed(a.out, X=X,
+    np.savez_compressed(out_path, X=X,
                         gesture=np.array(gestures), performer=np.array(performers),
                         session=np.array(sessions), role=np.array(roles),
                         hand=np.array(hands), name=np.array(names),
@@ -276,7 +292,7 @@ def main():
         print(f"\n제외 {len(dropped)}개:")
         for s, r in dropped[:20]:
             print(f"  {s}: {r}")
-    print(f"\n저장 -> {a.out}")
+    print(f"\n저장 -> {out_path}")
 
 
 if __name__ == "__main__":

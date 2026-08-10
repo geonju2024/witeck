@@ -5,8 +5,12 @@
 이 단계가 전체 파이프라인에서 유일하게 느린 부분입니다(영상 1개당 약 3~5초).
 한 번 뽑아두면 이후 실험은 전부 초 단위로 반복할 수 있습니다.
 
+경로는 paths.py 가 정한다(공유 드라이브 WITECH). 인자 없이 실행하면
+WITECH/videos -> WITECH/derived/landmarks 로 동작한다.
+
 사용법:
-    python 01_extract_landmarks.py --videos ./videos --out ./landmarks --workers 4
+    python 01_extract_landmarks.py
+    python 01_extract_landmarks.py --workers 8
 """
 import argparse
 import os
@@ -14,6 +18,8 @@ import glob
 import sys
 import time
 import numpy as np
+
+import paths
 
 # ---- 중요: 이 값들은 프로젝트 전체에서 공유되는 상수 ----
 N_HAND = 21          # MediaPipe Hands 랜드마크 수
@@ -125,18 +131,25 @@ def extract_one(args):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")   # 윈도우 cp949 콘솔에서 한글 깨짐 방지
     ap = argparse.ArgumentParser()
-    ap.add_argument("--videos", required=True, help="영상 폴더 (하위 폴더까지 재귀 탐색)")
-    ap.add_argument("--out", default="./landmarks")
+    ap.add_argument("--videos", default=str(paths.VIDEOS_DIR),
+                    help=f"영상 폴더 (하위 폴더까지 재귀 탐색). 기본값: {paths.VIDEOS_DIR}")
+    ap.add_argument("--out", default=str(paths.LANDMARKS_DIR),
+                    help=f"랜드마크 캐시 폴더. 기본값: {paths.LANDMARKS_DIR}")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2))
     a = ap.parse_args()
 
-    os.makedirs(a.out, exist_ok=True)
+    videos_dir = str(paths.assert_external(a.videos, "영상"))
+    out_dir = str(paths.assert_external(a.out, "랜드마크 캐시"))
+    print(f"영상   : {videos_dir}")
+    print(f"출력   : {out_dir}")
+
+    os.makedirs(out_dir, exist_ok=True)
     exts = ("mp4", "MP4", "mov", "MOV", "avi", "AVI", "mkv")
     files = sorted({f for e in exts
-                    for f in glob.glob(os.path.join(a.videos, "**", f"*.{e}"), recursive=True)})
+                    for f in glob.glob(os.path.join(videos_dir, "**", f"*.{e}"), recursive=True)})
     print(f"영상 {len(files)}개 발견, workers={a.workers}")
 
-    jobs = [(f, a.out, a.videos) for f in files]
+    jobs = [(f, out_dir, videos_dir) for f in files]
     t0 = time.time()
     if a.workers > 1:
         # MediaPipe 그래프는 프로세스마다 새로 만들어야 안전하다 (스레드 공유 금지)
@@ -149,7 +162,7 @@ def main():
             stem, msg, dt = extract_one(job)
             print(f"[{i}/{len(files)}] {stem}: {msg} ({dt:.1f}s)", flush=True)
 
-    print(f"\n완료. 총 {time.time()-t0:.0f}초 -> {a.out}")
+    print(f"\n완료. 총 {time.time()-t0:.0f}초 -> {out_dir}")
 
 
 if __name__ == "__main__":

@@ -11,9 +11,13 @@ dataset.npz -> 두 가지 과제를 각각 학습/평가한다. 전체 실행 �
     제스처별로 본인 15개 vs 타인 40개. 제안서의 '정확도 90%' 목표는
     여기서 측정해야 의미가 있다. FAR(타인 통과율)/FRR(본인 거부율)/EER 로 보고한다.
 
+경로는 paths.py 가 정한다(공유 드라이브 WITECH). 인자 없이 실행하면
+WITECH/derived/dataset.npz 를 읽고 WITECH/derived/runs/ 에 로그를 남긴다.
+
 사용법:
-    python 03_train.py --data dataset.npz --owners owners.csv
-    # owners.csv:  gesture,owner   (제스처별 등록자 1명)
+    python 03_train.py
+    python 03_train.py --owners owners.csv
+    # owners.csv:  gesture,owner   (제스처별 등록자 1명. 보통은 라벨에서 자동 판정한다)
 """
 import argparse
 import csv
@@ -29,6 +33,9 @@ from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold, cross_val_predict
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, roc_curve, auc
+
+import paths
+from runlog import add_log_arguments, start_run_log
 
 
 def models():
@@ -286,11 +293,24 @@ def task_b_verification(X, gesture, performer, owners, session=None):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")   # 윈도우 cp949 콘솔에서 한글 깨짐 방지
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="dataset.npz")
+    ap.add_argument("--data", default=str(paths.DATASET_NPZ),
+                    help=f"dataset.npz 경로. 기본값: {paths.DATASET_NPZ}")
     ap.add_argument("--owners", help="CSV: gesture,owner")
+    add_log_arguments(ap, paths.RUNS_DIR)
     a = ap.parse_args()
 
-    z = np.load(a.data, allow_pickle=True)
+    data_path = str(paths.assert_external(a.data, "dataset.npz"))
+    owners_path = str(paths.assert_external(a.owners, "owners.csv")) if a.owners else None
+    # 이 시점부터의 출력은 derived/runs/ 아래 타임스탬프 로그 파일에도 함께 기록된다.
+    start_run_log(
+        "03_train",
+        out_dir=a.log_dir,
+        data_files=[p for p in (data_path, owners_path) if p],
+        enabled=not a.no_log,
+    )
+    print(f"데이터 : {data_path}\n")
+
+    z = np.load(data_path, allow_pickle=True)
     X, gesture, performer = z["X"], list(z["gesture"]), list(z["performer"])
     session = list(z["session"]) if "session" in z.files else None
     role = list(z["role"]) if "role" in z.files else None
@@ -316,8 +336,8 @@ def main():
                 owners[g] = next(iter(who))
             else:
                 print(f"경고: {g} 의 등록자가 {sorted(who)} 로 여러 명입니다 -> 건너뜀")
-    elif a.owners:
-        with open(a.owners, encoding="utf-8-sig", newline="") as f:
+    elif owners_path:
+        with open(owners_path, encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
                 owners[row["gesture"].strip()] = row["owner"].strip()
     else:

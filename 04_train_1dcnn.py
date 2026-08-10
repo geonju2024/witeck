@@ -14,9 +14,12 @@
 선택 과제: gesture
   G1~G5 제스처 분류. 수행자 단위로 hold-out한다.
 
+경로는 paths.py 가 정한다(공유 드라이브 WITECH). 인자 없이 실행하면
+WITECH/derived/dataset.npz 를 읽고 WITECH/derived/runs/ 에 로그를 남긴다.
+
 사용 예시:
-  python 04_train_1dcnn.py --data dataset.npz
-  python 04_train_1dcnn.py --data dataset.npz --task both --epochs 50
+  python 04_train_1dcnn.py
+  python 04_train_1dcnn.py --task both --epochs 50
 """
 
 from __future__ import annotations
@@ -37,6 +40,9 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedGroupKFold, train_test_split
 from torch.utils.data import DataLoader, TensorDataset
+
+import paths
+from runlog import add_log_arguments, start_run_log
 
 
 # -------------------------
@@ -425,7 +431,8 @@ def task_gesture(X, meta, args, device):
 # -------------------------
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="dataset.npz")
+    ap.add_argument("--data", default=str(paths.DATASET_NPZ),
+                    help=f"dataset.npz 경로. 기본값: {paths.DATASET_NPZ}")
     ap.add_argument(
         "--task",
         choices=["verification", "gesture", "both"],
@@ -435,12 +442,31 @@ def main():
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--seed", type=int, default=42)
+    add_log_arguments(ap, paths.RUNS_DIR)
     args = ap.parse_args()
+
+    data_path = str(paths.assert_external(args.data, "dataset.npz"))
+
+    # 이 시점부터의 출력은 derived/runs/ 아래 타임스탬프 로그 파일에도 함께 기록된다.
+    start_run_log(
+        "04_train_1dcnn",
+        out_dir=args.log_dir,
+        data_files=[data_path],
+        extra={
+            "task": args.task,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "lr": args.lr,
+            "seed": args.seed,
+        },
+        enabled=not args.no_log,
+    )
 
     seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    X, meta, T, D = load_dataset(args.data)
+    X, meta, T, D = load_dataset(data_path)
+    print(f"데이터 = {data_path}")
     print(f"device = {device}")
     print(f"X = {X.shape} -> [N={len(X)}, T={T}, D={D}]")
     print(f"gestures = {sorted(set(meta['gesture']))}")

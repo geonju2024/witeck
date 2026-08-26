@@ -86,6 +86,39 @@ def print_metrics(model_key, metrics, classes):
     print("\nConfusion Matrix (row=true, col=pred)")
     print("classes:", classes)
     print(metrics["confusion_matrix"])
+    print("\nGesture | Precision | Recall | F1")
+    print("-" * 39)
+    for i, gesture in enumerate(classes):
+        print(
+            f"{gesture:<8}| "
+            f"{metrics['per_class_precision'][i]:>9.3f} | "
+            f"{metrics['per_class_recall'][i]:>6.3f} | "
+            f"{metrics['per_class_f1'][i]:>5.3f}"
+        )
+
+
+def save_metric_summaries(summary, per_class_rows):
+    out_dir = paths.DERIVED_DIR / "runs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_path = out_dir / "gesture_models_summary.csv"
+    summary_fields = [
+        "model", "accuracy", "balanced_accuracy",
+        "macro_precision", "macro_recall", "macro_f1",
+    ]
+    with summary_path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=summary_fields)
+        writer.writeheader()
+        writer.writerows(summary)
+
+    per_class_path = out_dir / "gesture_models_per_class_metrics.csv"
+    per_class_fields = ["model", "gesture", "precision", "recall", "f1"]
+    with per_class_path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=per_class_fields)
+        writer.writeheader()
+        writer.writerows(per_class_rows)
+
+    return summary_path, per_class_path
 
 
 def save_predictions(path, sample_idx, y_true, pred, classes, meta):
@@ -400,6 +433,7 @@ def main():
     )
 
     summary = []
+    per_class_rows = []
 
     for model_key in selected:
         seed_everything(args.seed)
@@ -445,12 +479,22 @@ def main():
             meta,
         )
 
-        summary.append((
-            model_key,
-            metrics["accuracy"],
-            metrics["balanced_accuracy"],
-            metrics["macro_f1"],
-        ))
+        summary.append({
+            "model": model_key,
+            "accuracy": metrics["accuracy"],
+            "balanced_accuracy": metrics["balanced_accuracy"],
+            "macro_precision": metrics["macro_precision"],
+            "macro_recall": metrics["macro_recall"],
+            "macro_f1": metrics["macro_f1"],
+        })
+        for i, gesture in enumerate(classes):
+            per_class_rows.append({
+                "model": model_key,
+                "gesture": gesture,
+                "precision": metrics["per_class_precision"][i],
+                "recall": metrics["per_class_recall"][i],
+                "f1": metrics["per_class_f1"][i],
+            })
 
     print("\n" + "=" * 80)
     print("ALL MODELS - GESTURE CLASSIFICATION FINAL TEST")
@@ -463,17 +507,23 @@ def main():
     )
     print("-" * 80)
 
-    for key, acc, bal, f1 in sorted(
+    for row in sorted(
         summary,
-        key=lambda x: x[3],
+        key=lambda x: x["macro_f1"],
         reverse=True,
     ):
         print(
-            f"{MODEL_LABEL[key]:<22}"
-            f"{acc:>12.3f}"
-            f"{bal:>12.3f}"
-            f"{f1:>12.3f}"
+            f"{MODEL_LABEL[row['model']]:<22}"
+            f"{row['accuracy']:>12.3f}"
+            f"{row['balanced_accuracy']:>12.3f}"
+            f"{row['macro_f1']:>12.3f}"
         )
+
+    summary_path, per_class_path = save_metric_summaries(
+        summary, per_class_rows
+    )
+    print(f"\nSummary CSV  -> {summary_path}")
+    print(f"Per-class CSV -> {per_class_path}")
 
 
 if __name__ == "__main__":

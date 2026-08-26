@@ -404,6 +404,29 @@ def predict_torch_proba(model, X, duration, device, batch_size):
 
 
 def multiclass_metrics(y_true, pred, classes):
+    labels = np.arange(len(classes))
+    per_class_precision = precision_score(
+        y_true,
+        pred,
+        labels=labels,
+        average=None,
+        zero_division=0,
+    )
+    per_class_recall = recall_score(
+        y_true,
+        pred,
+        labels=labels,
+        average=None,
+        zero_division=0,
+    )
+    per_class_f1 = f1_score(
+        y_true,
+        pred,
+        labels=labels,
+        average=None,
+        zero_division=0,
+    )
+
     return {
         "accuracy": float(accuracy_score(y_true, pred)),
         "balanced_accuracy": float(balanced_accuracy_score(y_true, pred)),
@@ -416,10 +439,13 @@ def multiclass_metrics(y_true, pred, classes):
         "macro_f1": float(
             f1_score(y_true, pred, average="macro", zero_division=0)
         ),
+        "per_class_precision": per_class_precision.astype(float),
+        "per_class_recall": per_class_recall.astype(float),
+        "per_class_f1": per_class_f1.astype(float),
         "confusion_matrix": confusion_matrix(
             y_true,
             pred,
-            labels=np.arange(len(classes)),
+            labels=labels,
         ),
     }
 

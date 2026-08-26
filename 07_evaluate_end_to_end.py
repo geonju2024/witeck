@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import warnings
 from pathlib import Path
 
 import joblib
@@ -110,6 +111,8 @@ def load_gesture_model(model_key, current_hash, device):
     if not path.exists():
         raise FileNotFoundError(
             f"Gesture checkpoint not found: {path}\n"
+            f"Run this first: python 06_train_gesture_models.py "
+            f"--models {model_key}\n"
             "먼저 python 06_train_gesture_models.py 를 실행하세요."
         )
 
@@ -126,8 +129,15 @@ def load_auth_model(model_key, gesture, current_hash, device):
     path = expected_path(model_key, "auth", gesture)
 
     if not path.exists():
+        if model_key in ("logreg", "svm", "rf", "gru", "lstm"):
+            command = f"python 03_train_baselines.py --models {model_key}"
+        elif model_key == "cnn":
+            command = "python 04_train_1dcnn.py"
+        else:
+            command = "python 05_train_transformer.py"
         raise FileNotFoundError(
             f"Authentication checkpoint not found: {path}\n"
+            f"Run this first: {command}\n"
             "03 / 04 / 05 학습 스크립트를 먼저 실행하세요."
         )
 
@@ -138,6 +148,70 @@ def load_auth_model(model_key, gesture, current_hash, device):
 
     validate_hash(ckpt["dataset_sha256"], current_hash, path)
     return ckpt, path
+
+
+ARCH_DEFAULTS = {
+    "gru": {"hidden_size": 64, "dropout": 0.2, "cell": "gru"},
+    "lstm": {"hidden_size": 64, "dropout": 0.2, "cell": "lstm"},
+    "transformer": {
+        "d_model": 128,
+        "nhead": 4,
+        "num_layers": 2,
+        "ff_dim": 256,
+        "dropout": 0.2,
+    },
+}
+
+
+def architecture_settings(ckpt, path):
+    """Return comparable architecture settings, warning on legacy defaults."""
+    model_key = ckpt["model_key"]
+    fields = ["input_dim"]
+    if model_key in ("gru", "lstm"):
+        fields += ["hidden_size", "dropout", "cell"]
+    elif model_key == "transformer":
+        fields += ["d_model", "nhead", "num_layers", "ff_dim", "dropout"]
+
+    settings = {}
+    defaults = ARCH_DEFAULTS.get(model_key, {})
+    for field in fields:
+        if field in ckpt:
+            settings[field] = ckpt[field]
+        elif field in defaults:
+            settings[field] = defaults[field]
+            warnings.warn(
+                f"{path}: missing '{field}'; using legacy default "
+                f"{defaults[field]!r}",
+                RuntimeWarning,
+            )
+        else:
+            raise RuntimeError(
+                f"Checkpoint architecture setting missing: {path}: {field}"
+            )
+    return settings
+
+
+def validate_stage_architectures(model_key, gesture_ckpt, gesture_path,
+                                 auth_ckpts, auth_paths):
+    if model_key in ("logreg", "svm", "rf"):
+        return
+
+    gesture_settings = architecture_settings(gesture_ckpt, gesture_path)
+    for gesture, auth_ckpt in auth_ckpts.items():
+        auth_settings = architecture_settings(auth_ckpt, auth_paths[gesture])
+        if auth_settings != gesture_settings:
+            differences = [
+                f"{name}: gesture={gesture_settings.get(name)!r}, "
+                f"auth={auth_settings.get(name)!r}"
+                for name in sorted(set(gesture_settings) | set(auth_settings))
+                if gesture_settings.get(name) != auth_settings.get(name)
+            ]
+            raise RuntimeError(
+                f"Architecture mismatch for {MODEL_LABEL[model_key]} / "
+                f"{gesture}:\n  gesture checkpoint: {gesture_path}\n"
+                f"  auth checkpoint: {auth_paths[gesture]}\n  "
+                + "\n  ".join(differences)
+            )
 
 
 def instantiate_torch_from_checkpoint(ckpt, device):
@@ -293,6 +367,18 @@ def macro_metrics_by_true_gesture(y_true, pred, true_gestures):
     }
 
 
+def two_stage_final_decisions(y_true, correct_route, routed_accept):
+    """Apply the experiment's genuine/impostor end-to-end decision rule."""
+    y_true = np.asarray(y_true, dtype=np.int64)
+    correct_route = np.asarray(correct_route, dtype=bool)
+    routed_accept = np.asarray(routed_accept, dtype=np.int64)
+    return np.where(
+        y_true == 1,
+        correct_route & (routed_accept == 1),
+        routed_accept == 1,
+    ).astype(np.int64)
+
+
 def evaluate_model_family(
     model_key,
     X_flat,
@@ -306,20 +392,25 @@ def evaluate_model_family(
     batch_size,
     out_rows,
 ):
-    gesture_ckpt, _ = load_gesture_model(
+    gesture_ckpt, gesture_path = load_gesture_model(
         model_key,
         current_hash,
         device,
     )
 
     auth_ckpts = {}
+    auth_paths = {}
     for g in classes:
-        auth_ckpts[g], _ = load_auth_model(
+        auth_ckpts[g], auth_paths[g] = load_auth_model(
             model_key,
             g,
             current_hash,
             device,
         )
+
+    validate_stage_architectures(
+        model_key, gesture_ckpt, gesture_path, auth_ckpts, auth_paths
+    )
 
     gesture_pred_id = predict_gesture(
         model_key,
@@ -353,6 +444,7 @@ def evaluate_model_family(
 
     direct_pred = np.zeros(len(final_idx), dtype=np.int64)
     routed_pred = np.zeros(len(final_idx), dtype=np.int64)
+    routed_accepts = np.zeros(len(final_idx), dtype=np.int64)
 
     wrong_route = pred_gestures != true_gestures
     wrong_route_accepted = np.zeros(len(final_idx), dtype=bool)
@@ -382,17 +474,7 @@ def evaluate_model_family(
             device,
         )
 
-        # Final decision:
-        # genuine: correct gesture route AND routed auth accepted
-        # impostor: any routed auth acceptance counts as false accept
-        if y_true[i] == 1:
-            routed_pred[i] = int(
-                pred_g == true_g and routed_accept == 1
-            )
-        else:
-            routed_pred[i] = int(
-                routed_accept == 1
-            )
+        routed_accepts[i] = routed_accept
 
         wrong_route_accepted[i] = bool(
             wrong_route[i]
@@ -413,6 +495,12 @@ def evaluate_model_family(
             "wrong_route": int(wrong_route[i]),
             "wrong_route_accepted": int(wrong_route_accepted[i]),
         })
+
+    routed_pred[:] = two_stage_final_decisions(
+        y_true, ~wrong_route, routed_accepts
+    )
+    for row, final_accept in zip(out_rows[-len(final_idx):], routed_pred):
+        row["two_stage_final_accept"] = int(final_accept)
 
     direct_global = binary_metrics(y_true, direct_pred)
     routed_global = binary_metrics(y_true, routed_pred)
@@ -453,6 +541,9 @@ def evaluate_model_family(
         np.mean(wrong_route)
     )
 
+    genuine_wrong_route_rate = 1.0 - genuine_route_acc
+    impostor_wrong_route_rate = 1.0 - impostor_route_acc
+
     wrong_route_accept_rate = (
         float(np.mean(wrong_route_accepted[wrong_route]))
         if np.any(wrong_route)
@@ -469,8 +560,76 @@ def evaluate_model_family(
         "genuine_route_accuracy": genuine_route_acc,
         "impostor_route_accuracy": impostor_route_acc,
         "wrong_route_rate": wrong_route_rate,
+        "genuine_wrong_route_rate": genuine_wrong_route_rate,
+        "impostor_wrong_route_rate": impostor_wrong_route_rate,
         "wrong_route_accept_rate": wrong_route_accept_rate,
     }
+
+
+def print_summary_table(summaries, title, metric_key):
+    print("\n" + "=" * 158)
+    print("ALL MODELS - END-TO-END FINAL TEST")
+    print(title)
+    print("=" * 158)
+    print(
+        f"{'Model':<22}{'Direct Acc':>11}{'Direct Bal':>11}"
+        f"{'Direct FAR':>11}{'Direct FRR':>11}{'2Stage Acc':>12}"
+        f"{'2Stage Bal':>11}{'2Stage FAR':>11}{'2Stage FRR':>11}"
+        f"{'Route Acc':>11}{'Wrong Route':>13}"
+    )
+    print("-" * 158)
+    for result in summaries:
+        direct = result[f"direct_{metric_key}"]
+        two_stage = result[f"two_stage_{metric_key}"]
+        print(
+            f"{MODEL_LABEL[result['model_key']]:<22}"
+            f"{direct['accuracy']:>11.3f}"
+            f"{direct['balanced_accuracy']:>11.3f}"
+            f"{direct['far']:>11.3f}{direct['frr']:>11.3f}"
+            f"{two_stage['accuracy']:>12.3f}"
+            f"{two_stage['balanced_accuracy']:>11.3f}"
+            f"{two_stage['far']:>11.3f}{two_stage['frr']:>11.3f}"
+            f"{result['gesture_route_accuracy']:>11.3f}"
+            f"{result['wrong_route_rate']:>13.3f}"
+        )
+
+
+def save_end_to_end_summary(summaries):
+    fields = [
+        "model",
+        "direct_global_accuracy", "direct_global_balanced_accuracy",
+        "direct_global_far", "direct_global_frr",
+        "two_stage_global_accuracy", "two_stage_global_balanced_accuracy",
+        "two_stage_global_far", "two_stage_global_frr",
+        "direct_macro_accuracy", "direct_macro_balanced_accuracy",
+        "direct_macro_far", "direct_macro_frr",
+        "two_stage_macro_accuracy", "two_stage_macro_balanced_accuracy",
+        "two_stage_macro_far", "two_stage_macro_frr",
+        "gesture_route_accuracy", "genuine_route_accuracy",
+        "impostor_route_accuracy", "wrong_route_rate",
+        "genuine_wrong_route_rate", "impostor_wrong_route_rate",
+        "wrong_route_accept_rate",
+    ]
+    rows = []
+    for result in summaries:
+        row = {"model": result["model_key"]}
+        for prefix in (
+            "direct_global", "two_stage_global",
+            "direct_macro", "two_stage_macro",
+        ):
+            for metric in ("accuracy", "balanced_accuracy", "far", "frr"):
+                row[f"{prefix}_{metric}"] = result[prefix][metric]
+        for field in fields[17:]:
+            row[field] = result[field]
+        rows.append(row)
+
+    path = Path(paths.DERIVED_DIR) / "runs" / "end_to_end_models_summary.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
 
 
 def main():
@@ -605,46 +764,21 @@ def main():
             f"Gesture route accuracy={result['gesture_route_accuracy']:.3f}, "
             f"wrong-route rate={result['wrong_route_rate']:.3f}"
         )
-
-    print(
-        "\n"
-        + "=" * 124
-    )
-    print(
-        "ALL MODELS - END-TO-END FINAL TEST "
-        "(macro mean over G1~G5)"
-    )
-    print(
-        "=" * 124
-    )
-    print(
-        f"{'Model':<22}"
-        f"{'Direct Acc':>12}"
-        f"{'Direct Bal':>12}"
-        f"{'2Stage Acc':>12}"
-        f"{'2Stage Bal':>12}"
-        f"{'2Stage FAR':>12}"
-        f"{'2Stage FRR':>12}"
-        f"{'Route Acc':>11}"
-    )
-    print(
-        "-" * 124
-    )
-
-    for r in summaries:
-        d = r["direct_macro"]
-        t = r["two_stage_macro"]
-
         print(
-            f"{MODEL_LABEL[r['model_key']]:<22}"
-            f"{d['accuracy']:>12.3f}"
-            f"{d['balanced_accuracy']:>12.3f}"
-            f"{t['accuracy']:>12.3f}"
-            f"{t['balanced_accuracy']:>12.3f}"
-            f"{t['far']:>12.3f}"
-            f"{t['frr']:>12.3f}"
-            f"{r['gesture_route_accuracy']:>11.3f}"
+            f"Genuine wrong-route rate="
+            f"{result['genuine_wrong_route_rate']:.3f}, "
+            f"impostor wrong-route rate="
+            f"{result['impostor_wrong_route_rate']:.3f}, "
+            f"wrong-route accept rate="
+            f"{result['wrong_route_accept_rate']:.3f}"
         )
+
+    print_summary_table(
+        summaries, "GLOBAL OVER ALL FINAL SAMPLES", "global"
+    )
+    print_summary_table(
+        summaries, "MACRO MEAN OVER G1~G5", "macro"
+    )
 
     out_path = (
         Path(paths.DERIVED_DIR)
@@ -689,6 +823,8 @@ def main():
     print(
         f"\nSample-level CSV -> {out_path}"
     )
+    summary_path = save_end_to_end_summary(summaries)
+    print(f"Summary CSV -> {summary_path}")
 
 
 if __name__ == "__main__":

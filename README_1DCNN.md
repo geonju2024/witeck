@@ -115,3 +115,8 @@ train_prototypical.py
 evaluate_pairs.py
 tests/test_model_shapes.py
 ```
+
+## Multi-Stream Dilated Siamese
+
+The feature-aware multi-stream model is available through
+`--model multistream`. See [README_MULTISTREAM.md](README_MULTISTREAM.md).

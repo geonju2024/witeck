@@ -8,7 +8,11 @@ from torch.utils.data import DataLoader
 
 from witeck_auth.data import PairDataset, WiteckArrays
 from witeck_auth.metrics import verification_metrics
-from witeck_auth.models import InceptionTimeSiamese, TCNSiamese
+from witeck_auth.models import (
+    InceptionTimeSiamese,
+    MultiStreamDilatedSiamese,
+    TCNSiamese,
+)
 
 
 def main() -> None:
@@ -21,7 +25,15 @@ def main() -> None:
     args = parser.parse_args()
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    model_cls = InceptionTimeSiamese if checkpoint["model_name"] == "inception" else TCNSiamese
+    model_classes = {
+        "inception": InceptionTimeSiamese,
+        "tcn": TCNSiamese,
+        "multistream": MultiStreamDilatedSiamese,
+    }
+    model_name = checkpoint["model_name"]
+    if model_name not in model_classes:
+        raise ValueError(f"unsupported checkpoint model_name: {model_name}")
+    model_cls = model_classes[model_name]
     model = model_cls(input_dim=int(checkpoint["input_dim"]))
     model.load_state_dict(checkpoint["model_state"])
     model.eval()

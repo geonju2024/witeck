@@ -10,14 +10,20 @@ from torch.utils.data import DataLoader
 from witeck_auth.data import FeatureStandardizer, PairDataset, WiteckArrays
 from witeck_auth.losses import SiameseVerificationLoss
 from witeck_auth.metrics import verification_metrics
-from witeck_auth.models import InceptionTimeSiamese, TCNSiamese
+from witeck_auth.models import (
+    InceptionTimeSiamese,
+    MultiStreamDilatedSiamese,
+    TCNSiamese,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True, help="NPZ with X/user_ids/gesture_ids")
     parser.add_argument("--validation-data", help="Optional disjoint validation NPZ")
-    parser.add_argument("--model", choices=("inception", "tcn"), required=True)
+    parser.add_argument(
+        "--model", choices=("inception", "tcn", "multistream"), required=True
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -61,7 +67,12 @@ def main() -> None:
             validation_dataset, batch_size=args.batch_size, shuffle=False
         )
     input_dim = x.shape[-1]
-    model = InceptionTimeSiamese(input_dim) if args.model == "inception" else TCNSiamese(input_dim)
+    model_classes = {
+        "inception": InceptionTimeSiamese,
+        "tcn": TCNSiamese,
+        "multistream": MultiStreamDilatedSiamese,
+    }
+    model = model_classes[args.model](input_dim)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

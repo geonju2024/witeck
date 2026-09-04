@@ -1,0 +1,87 @@
+{
+  "checks": {
+    "shape": [
+      1955,
+      5408
+    ],
+    "dtype": "float32",
+    "unique_names": 1955,
+    "finite_features": true,
+    "updated_rows": 8,
+    "unchanged_rows": 1947
+  },
+  "samples": [
+    {
+      "relative_path": "G1/P01/20260725/G1_P01_20260725_own_001.mp4",
+      "row_index": 0,
+      "hand_detection_rate": 0.40458015267175573,
+      "hand": "R",
+      "duration_sec": 4.399610996246338,
+      "fps": 30.004276275634766,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260725/G1_P01_20260725_own_004.mp4",
+      "row_index": 3,
+      "hand_detection_rate": 0.5416666666666666,
+      "hand": "R",
+      "duration_sec": 4.033022403717041,
+      "fps": 30.00425148010254,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260725/G1_P01_20260725_own_007.mp4",
+      "row_index": 6,
+      "hand_detection_rate": 0.5084745762711864,
+      "hand": "R",
+      "duration_sec": 3.966900110244751,
+      "fps": 30.004152297973633,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260725/G1_P01_20260725_own_008.mp4",
+      "row_index": 7,
+      "hand_detection_rate": 0.4351145038167939,
+      "hand": "R",
+      "duration_sec": 4.399610996246338,
+      "fps": 30.004276275634766,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260725/G1_P01_20260725_own_012.mp4",
+      "row_index": 11,
+      "hand_detection_rate": 0.5564516129032258,
+      "hand": "R",
+      "duration_sec": 4.166311264038086,
+      "fps": 30.004240036010742,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260730/G1_P01_20260730_own_002.mp4",
+      "row_index": 16,
+      "hand_detection_rate": 0.4262295081967213,
+      "hand": "R",
+      "duration_sec": 4.099644660949707,
+      "fps": 30.004180908203125,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260803/G1_P01_20260803_own_001.mp4",
+      "row_index": 25,
+      "hand_detection_rate": 0.7129629629629629,
+      "hand": "R",
+      "duration_sec": 3.6330666542053223,
+      "fps": 30.00431251525879,
+      "truncated": false
+    },
+    {
+      "relative_path": "G1/P01/20260803/G1_P01_20260803_own_002.mp4",
+      "row_index": 26,
+      "hand_detection_rate": 0.46551724137931033,
+      "hand": "R",
+      "duration_sec": 3.9162888526916504,
+      "fps": 29.939775466918945,
+      "truncated": false
+    }
+  ]
+}

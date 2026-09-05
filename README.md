@@ -155,6 +155,34 @@ Conv1D
 own / impostor
 ```
 
+## 09_train_siamese_embedding.py
+
+사용자 인증 전용 Dilated Siamese 1D CNN이다. 기존 입력 `[N, 32, 169]`를
+그대로 받아 128차원 움직임 임베딩을 만들고, 등록 템플릿과 cosine similarity로
+본인 여부를 판정한다.
+
+```text
+1x1 Conv
+↓
+Residual Dilated Conv1D (1, 2, 4, 8)
+↓
+Masked Mean + Std + Max Pooling
+↓
+128D L2-normalized embedding
+↓
+Cosine similarity + validation threshold
+```
+
+```bash
+python 09_train_siamese_embedding.py --data /path/to/dataset.npz
+```
+
+등록 영상 개수 1/3/5개를 비교하려면 다음을 실행한다.
+
+```bash
+python 10_siamese_enrollment_sweep.py --data /path/to/dataset.npz
+```
+
 ## 실행 순서
 
 ```bash

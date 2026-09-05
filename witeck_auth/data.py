@@ -7,6 +7,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from .augmentation import SequenceAugmenter
+
 
 FEATURE_KEYS = ("X", "features", "data", "sequences")
 USER_KEYS = (
@@ -78,11 +80,13 @@ class PairDataset(Dataset):
         gesture_ids: np.ndarray,
         pairs_per_epoch: int | None = None,
         seed: int = 42,
+        augmenter: SequenceAugmenter | None = None,
     ) -> None:
         self.x = torch.as_tensor(x, dtype=torch.float32)
         self.users = np.asarray(user_ids).astype(str)
         self.gestures = np.asarray(gesture_ids).astype(str)
         self.seed = seed
+        self.augmenter = augmenter
         self.epoch = 0
         self.pairs_per_epoch = pairs_per_epoch or max(2048, len(x) * 4)
         self.by_gesture: dict[str, np.ndarray] = {
@@ -118,7 +122,12 @@ class PairDataset(Dataset):
         else:
             choices = same_gesture[self.users[same_gesture] != self.users[anchor]]
         partner = int(choices[rng.integers(len(choices))])
-        return self.x[anchor], self.x[partner], torch.tensor(float(positive))
+        left = self.x[anchor]
+        right = self.x[partner]
+        if self.augmenter is not None:
+            left = torch.from_numpy(self.augmenter(left.numpy(), rng))
+            right = torch.from_numpy(self.augmenter(right.numpy(), rng))
+        return left, right, torch.tensor(float(positive))
 
 
 class SequenceDataset(Dataset):

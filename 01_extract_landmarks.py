@@ -40,6 +40,12 @@ import time
 import numpy as np
 
 import paths
+from witeck_auth.hand_fallback import (
+    SOURCE_LABELS,
+    SOURCE_TRACKING,
+    recover_missing_hands,
+)
+
 
 
 # ---- 프로젝트 공통 상수 ----
@@ -193,7 +199,14 @@ def read_frames(path, max_frames=300):
 
 
 def extract_one(args):
-    video_path, out_dir, videos_root = args
+    (
+        video_path,
+        out_dir,
+        videos_root,
+        use_fallback,
+        fallback_confidence,
+        pose_crop_scale,
+    ) = args
 
     import cv2
     import mediapipe as mp
@@ -264,6 +277,17 @@ def extract_one(args):
         np.int8,
     )
 
+    hand_detection_source = np.zeros(
+        (T, MAX_HANDS),
+        np.uint8,
+    )
+
+    hand_confidence = np.zeros(
+        (T, MAX_HANDS),
+        np.float32,
+    )
+
+
     pose = np.zeros(
         (T, N_POSE, 4),
         np.float32,
@@ -289,7 +313,13 @@ def extract_one(args):
         model_complexity=1,
         min_detection_confidence=0.3,
         min_tracking_confidence=0.3,
-    ) as poser:
+    ) as poser, mp_hands.Hands(
+        static_image_mode=True,
+        max_num_hands=MAX_HANDS,
+        model_complexity=1,
+        min_detection_confidence=fallback_confidence,
+        min_tracking_confidence=fallback_confidence,
+    ) as fallback_hands:
 
         for t, frame in enumerate(frames):
 
@@ -299,6 +329,9 @@ def extract_one(args):
             )
 
             rgb.flags.writeable = False
+
+            # Pose is evaluated first so its wrists can guide the hand fallback.
+            rp = poser.process(rgb)
 
             # -------------------------
             # Hands
@@ -317,6 +350,7 @@ def extract_one(args):
                     ]
 
                     hand_valid[t, k] = 1
+                    hand_detection_source[t, k] = SOURCE_TRACKING
 
                     if (
                         rh.multi_handedness
@@ -334,11 +368,33 @@ def extract_one(args):
                             else 0
                         )
 
+                        hand_confidence[t, k] = float(
+                            rh.multi_handedness[k]
+                            .classification[0]
+                            .score
+                        )
+
+            if use_fallback and not hand_valid[t].any():
+                candidates = recover_missing_hands(
+                    frame,
+                    rgb,
+                    rp.pose_landmarks,
+                    fallback_hands,
+                    W,
+                    H,
+                    pose_crop_scale=pose_crop_scale,
+                )
+                for k, candidate in enumerate(candidates[:MAX_HANDS]):
+                    hand[t, k] = candidate["landmarks"]
+                    hand_valid[t, k] = 1
+                    handedness[t, k] = candidate["handedness"]
+                    hand_confidence[t, k] = candidate["score"]
+                    hand_detection_source[t, k] = candidate["source"]
+
+
             # -------------------------
             # Pose
             # -------------------------
-            rp = poser.process(rgb)
-
             if rp.pose_landmarks:
 
                 pose[t] = [
@@ -362,6 +418,12 @@ def extract_one(args):
         hand=hand,
         hand_valid=hand_valid,
         handedness=handedness,
+        hand_detection_source=hand_detection_source,
+        hand_confidence=hand_confidence,
+        hand_detection_source_labels=SOURCE_LABELS,
+        fallback_enabled=np.bool_(use_fallback),
+        fallback_detection_confidence=np.float32(fallback_confidence),
+        pose_crop_scale=np.float32(pose_crop_scale),
 
         pose=pose,
         pose_valid=pose_valid,
@@ -394,6 +456,12 @@ def extract_one(args):
         pose_valid.mean()
     )
 
+    fallback_frames = int(
+        np.sum(
+            hand_detection_source.max(axis=1)
+            > SOURCE_TRACKING
+        )
+    )
     trunc_msg = " TRUNCATED" if truncated else ""
 
     return (
@@ -403,6 +471,7 @@ def extract_one(args):
             f"fps={fps:.2f} "
             f"duration={duration_sec:.2f}s "
             f"hand={hand_rate:.0%} "
+            f"fallback={fallback_frames}/{T} "
             f"pose={pose_rate:.0%}"
             f"{trunc_msg}"
         ),
@@ -448,7 +517,27 @@ def main():
         ),
     )
 
+    ap.add_argument(
+        "--no-hand-fallback",
+        action="store_true",
+        help="Disable static/enhanced/pose-guided hand recovery.",
+    )
+    ap.add_argument(
+        "--fallback-detection-confidence",
+        type=float,
+        default=0.20,
+    )
+    ap.add_argument(
+        "--pose-crop-scale",
+        type=float,
+        default=2.5,
+    )
+
     args = ap.parse_args()
+    if not 0.0 < args.fallback_detection_confidence <= 1.0:
+        ap.error("--fallback-detection-confidence must be in (0, 1].")
+    if args.pose_crop_scale <= 0.0:
+        ap.error("--pose-crop-scale must be greater than zero.")
 
     videos_dir = str(
         paths.assert_external(
@@ -512,6 +601,9 @@ def main():
             f,
             out_dir,
             videos_dir,
+            not args.no_hand_fallback,
+            args.fallback_detection_confidence,
+            args.pose_crop_scale,
         )
         for f in files
     ]

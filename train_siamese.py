@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from witeck_auth.augmentation import SequenceAugmenter
 from witeck_auth.data import FeatureStandardizer, PairDataset, WiteckArrays
 from witeck_auth.losses import SiameseVerificationLoss
 from witeck_auth.metrics import verification_metrics
@@ -29,7 +30,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
-    return parser.parse_args()
+    parser.add_argument("--no-augmentation", action="store_true")
+    parser.add_argument("--noise-std", type=float, default=0.02)
+    parser.add_argument("--frame-mask-probability", type=float, default=0.35)
+    parser.add_argument("--max-mask-frames", type=int, default=4)
+    parser.add_argument("--temporal-crop-probability", type=float, default=0.50)
+    parser.add_argument("--min-crop-ratio", type=float, default=0.85)
+    parser.add_argument("--max-shift-frames", type=int, default=2)
+    args = parser.parse_args()
+    if args.noise_std < 0.0:
+        parser.error("--noise-std must be non-negative")
+    for name in ("frame_mask_probability", "temporal_crop_probability"):
+        if not 0.0 <= getattr(args, name) <= 1.0:
+            parser.error(f"--{name.replace('_', '-')} must be in [0, 1]")
+    if args.max_mask_frames < 0 or args.max_shift_frames < 0:
+        parser.error("mask and shift frame counts must be non-negative")
+    if not 0.0 < args.min_crop_ratio <= 1.0:
+        parser.error("--min-crop-ratio must be in (0, 1]")
+    return args
 
 
 @torch.no_grad()
@@ -50,7 +68,32 @@ def main() -> None:
     arrays = WiteckArrays.from_npz(args.data)
     scaler = FeatureStandardizer().fit(arrays.x)
     x = scaler.transform(arrays.x)
-    dataset = PairDataset(x, arrays.user_ids, arrays.gesture_ids, seed=args.seed)
+    valid_mask_index = 168 if x.shape[-1] == 169 else None
+    invalid_mask_value = 0.0
+    if valid_mask_index is not None:
+        invalid_mask_value = float(
+            -scaler.mean[0, 0, valid_mask_index]
+            / scaler.std[0, 0, valid_mask_index]
+        )
+    augmenter = None
+    if not args.no_augmentation:
+        augmenter = SequenceAugmenter(
+            noise_std=args.noise_std,
+            frame_mask_probability=args.frame_mask_probability,
+            max_mask_frames=args.max_mask_frames,
+            temporal_crop_probability=args.temporal_crop_probability,
+            min_crop_ratio=args.min_crop_ratio,
+            max_shift_frames=args.max_shift_frames,
+            valid_mask_index=valid_mask_index,
+            invalid_mask_value=invalid_mask_value,
+        )
+    dataset = PairDataset(
+        x,
+        arrays.user_ids,
+        arrays.gesture_ids,
+        seed=args.seed,
+        augmenter=augmenter,
+    )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     validation_loader = None
     if args.validation_data:
@@ -78,6 +121,22 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = SiameseVerificationLoss()
+
+    augmentation_config = (
+        None
+        if augmenter is None
+        else {
+            "noise_std": augmenter.noise_std,
+            "frame_mask_probability": augmenter.frame_mask_probability,
+            "max_mask_frames": augmenter.max_mask_frames,
+            "temporal_crop_probability": augmenter.temporal_crop_probability,
+            "min_crop_ratio": augmenter.min_crop_ratio,
+            "max_shift_frames": augmenter.max_shift_frames,
+            "valid_mask_index": augmenter.valid_mask_index,
+            "invalid_mask_value": augmenter.invalid_mask_value,
+        }
+    )
+    print(json.dumps({"device": str(device), "augmentation": augmentation_config}))
 
     last_metrics = {}
     best_eer = float("inf")
@@ -123,6 +182,7 @@ def main() -> None:
             "threshold": selected_threshold,
             "normalization_mean": scaler.mean,
             "normalization_std": scaler.std,
+            "augmentation": augmentation_config,
         },
         destination,
     )

@@ -59,7 +59,14 @@ def binary_decision_metrics(labels, pred):
 
 
 @torch.no_grad()
-def predict_gestures(model, X, duration, device, batch_size=128):
+def predict_gestures(
+    model,
+    X,
+    duration,
+    device,
+    batch_size=128,
+    class_prototypes=None,
+):
     loader = embedding_module.make_loader(
         X,
         duration,
@@ -70,8 +77,18 @@ def predict_gestures(model, X, duration, device, batch_size=128):
     pred = []
     model.eval()
     for xb, db, _ in loader:
-        _, logits = model(xb.to(device), db.to(device))
-        pred.append(logits.argmax(dim=1).cpu().numpy())
+        embedding, logits = model(xb.to(device), db.to(device))
+        if class_prototypes is None:
+            batch_prediction = logits.argmax(dim=1)
+        else:
+            prototypes = torch.as_tensor(
+                class_prototypes,
+                dtype=embedding.dtype,
+                device=embedding.device,
+            )
+            prototypes = torch.nn.functional.normalize(prototypes, p=2, dim=1)
+            batch_prediction = (embedding @ prototypes.T).argmax(dim=1)
+        pred.append(batch_prediction.cpu().numpy())
     return np.concatenate(pred)
 
 
@@ -82,11 +99,94 @@ def load_model(checkpoint_path, current_hash, device):
             f"dataset SHA mismatch: {checkpoint_path}\n"
             f"checkpoint={ckpt.get('dataset_sha256')}\ncurrent={current_hash}"
         )
-    model = Embedding1DCNN(
-        input_dim=int(ckpt["input_dim"]),
-        num_classes=int(ckpt["num_classes"]),
-        embedding_dim=int(ckpt["embedding_dim"]),
-    )
+    architecture = ckpt.get("architecture", "basic-1dcnn")
+    if ckpt.get("model_family") == "siamese":
+        module = importlib.import_module("09_train_siamese_embedding")
+        siamese_models = {
+            "dilated": module.Siamese1DCNN,
+            "lite-stats": module.LiteStatsSiamese1DCNN,
+            "phase-pyramid": module.PhasePyramidSiamese1DCNN,
+        }
+        if architecture not in siamese_models:
+            raise RuntimeError(f"Unsupported Siamese architecture: {architecture}")
+        model = siamese_models[architecture](
+            input_dim=int(ckpt["input_dim"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "attentive-stats-supcon":
+        module = importlib.import_module("17_train_attentive_stats_supcon")
+        model = module.AttentiveStatsEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "gesture-conditioned-supcon":
+        module = importlib.import_module("18_train_gesture_conditioned_supcon")
+        model = module.GestureConditionedEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            num_gestures=int(ckpt["num_gestures"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "multiscale-supcon":
+        module = importlib.import_module("19_train_metric_variants")
+        model = module.MultiScaleEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "dual-stream-supcon":
+        module = importlib.import_module("22_train_dual_stream_supcon")
+        model = module.DualStreamEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "residual-tcn-stats-supcon":
+        module = importlib.import_module("23_train_residual_tcn_stats_supcon")
+        model = module.ResidualTCNStatsEmbedding(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "skeletal-geometry-supcon":
+        module = importlib.import_module("24_train_skeletal_geometry_supcon")
+        model = module.GeometryAugmentedEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+            sequence_mean=ckpt["sequence_mean"],
+            sequence_std=ckpt["sequence_std"],
+        )
+    elif architecture == "projected-supcon-v2":
+        module = importlib.import_module("26_train_projected_supcon_v2")
+        model = module.ProjectedSupConEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "center-loss-1dcnn":
+        module = importlib.import_module("28_train_center_loss_embedding")
+        model = module.CenterLossEmbedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture == "light-cnn-transformer-supcon":
+        module = importlib.import_module("30_train_light_cnn_transformer_supcon")
+        model = module.LightCNNTransformerEmbedding(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+            seq_len=int(ckpt["seq_len"]),
+            model_dim=int(ckpt.get("transformer_model_dim", 64)),
+        )
+    else:
+        model = Embedding1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
     model.load_state_dict(ckpt["model_state_dict"])
     model.to(device).eval()
     return ckpt, model
@@ -96,6 +196,25 @@ def normalize_for_checkpoint(X_seq, duration, ckpt):
     X = apply_sequence_stats(X_seq, ckpt["sequence_mean"], ckpt["sequence_std"])
     d = apply_duration_stats(duration, ckpt["duration_mean"], ckpt["duration_std"])
     return X, d
+
+
+@torch.no_grad()
+def extract_any_embeddings(model, X, duration, device, batch_size=128):
+    """Extract embeddings from either classifier-style or Siamese encoders."""
+    loader = embedding_module.make_loader(
+        X,
+        duration,
+        np.zeros(len(X), dtype=np.int64),
+        batch_size,
+        shuffle=False,
+    )
+    result = []
+    model.eval()
+    for xb, db, _ in loader:
+        output = model(xb.to(device), db.to(device))
+        embedding = output[0] if isinstance(output, (tuple, list)) else output
+        result.append(embedding.cpu().numpy())
+    return np.concatenate(result, axis=0)
 
 
 def mean_metrics(rows, prefix):
@@ -146,13 +265,39 @@ def main():
     X_gesture, d_gesture = normalize_for_checkpoint(X_seq, duration, gesture_ckpt)
     X_auth, d_auth = normalize_for_checkpoint(X_seq, duration, auth_ckpt)
     gesture_pred_label = predict_gestures(
-        gesture_model, X_gesture, d_gesture, device, args.batch_size
+        gesture_model,
+        X_gesture,
+        d_gesture,
+        device,
+        args.batch_size,
+        class_prototypes=gesture_ckpt.get("class_prototypes"),
     )
     gesture_classes = [str(x) for x in gesture_ckpt["classes"]]
     gesture_pred = np.asarray([gesture_classes[int(i)] for i in gesture_pred_label])
-    auth_embeddings = extract_embeddings(
-        auth_model, X_auth, d_auth, device, args.batch_size
-    )
+    auth_architecture = auth_ckpt.get("architecture", "basic-1dcnn")
+    if auth_architecture == "gesture-conditioned-supcon":
+        conditioned_module = importlib.import_module(
+            "18_train_gesture_conditioned_supcon"
+        )
+        auth_embeddings_by_gesture = (
+            conditioned_module.extract_all_gesture_embeddings(
+                auth_model, X_auth, d_auth, device, args.batch_size
+            )
+        )
+        auth_gesture_classes = [str(x) for x in auth_ckpt["gesture_classes"]]
+        auth_gesture_to_label = {
+            name: i for i, name in enumerate(auth_gesture_classes)
+        }
+        true_auth_embeddings = np.stack([
+            auth_embeddings_by_gesture[i, auth_gesture_to_label[str(g)]]
+            for i, g in enumerate(meta["gesture"])
+        ])
+    else:
+        auth_embeddings_by_gesture = None
+        auth_gesture_to_label = None
+        true_auth_embeddings = extract_any_embeddings(
+            auth_model, X_auth, d_auth, device, args.batch_size
+        )
 
     performer = meta["performer"]
     gesture = meta["gesture"]
@@ -175,7 +320,7 @@ def main():
                     f"{target_user}/{g}: need {enroll_count} enrollment samples, found {len(candidates)}"
                 )
             selected = candidates[:enroll_count]
-            templates[(target_user, g)] = auth_embeddings[selected].mean(axis=0)
+            templates[(target_user, g)] = true_auth_embeddings[selected].mean(axis=0)
             enrollment_indices[(target_user, g)] = selected
 
     rows = []
@@ -208,17 +353,29 @@ def main():
             ])
 
             direct_scores = cosine_scores(
-                auth_embeddings[trial_idx], templates[(target_user, true_gesture)]
+                true_auth_embeddings[trial_idx], templates[(target_user, true_gesture)]
             )
             direct_pred = (direct_scores >= threshold).astype(np.int64)
 
-            routed_scores = np.asarray([
-                float(cosine_scores(
-                    auth_embeddings[idx:idx + 1],
-                    templates[(target_user, str(gesture_pred[idx]))],
-                )[0])
-                for idx in trial_idx
-            ])
+            if auth_embeddings_by_gesture is None:
+                routed_scores = np.asarray([
+                    float(cosine_scores(
+                        true_auth_embeddings[idx:idx + 1],
+                        templates[(target_user, str(gesture_pred[idx]))],
+                    )[0])
+                    for idx in trial_idx
+                ])
+            else:
+                routed_scores = np.asarray([
+                    float(cosine_scores(
+                        auth_embeddings_by_gesture[
+                            idx:idx + 1,
+                            auth_gesture_to_label[str(gesture_pred[idx])],
+                        ],
+                        templates[(target_user, str(gesture_pred[idx]))],
+                    )[0])
+                    for idx in trial_idx
+                ])
             route_correct = (gesture_pred[trial_idx] == true_gesture)
             routed_accept = routed_scores >= threshold
             e2e_pred = (

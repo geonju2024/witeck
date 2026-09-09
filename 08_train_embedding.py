@@ -805,6 +805,12 @@ def main():
     )
 
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=SEED,
+    )
+
+    parser.add_argument(
         "--output-dir",
         type=str,
         default=str(project_dir / "output" / "basic_embedding_pipeline" / "user_auth"),
@@ -812,7 +818,7 @@ def main():
 
     args = parser.parse_args()
 
-    seed_everything()
+    seed_everything(args.seed)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -1167,6 +1173,7 @@ def main():
             "dataset_path": str(Path(args.data).resolve()),
             "dataset_sha256": file_sha256(args.data),
             "enrollment_per_gesture": args.enroll,
+            "seed": args.seed,
             "validation_eer": val_eer,
             "unseen_metrics": global_metrics,
             "unseen_test_eer_analysis": test_eer,
@@ -1212,6 +1219,7 @@ def main():
         f.write("architecture=basic-1dcnn-embedding\n")
         f.write(f"dataset={Path(args.data).resolve()}\n")
         f.write(f"dataset_sha256={file_sha256(args.data)}\n")
+        f.write(f"seed={args.seed}\n")
         f.write(
             f"train_users={TRAIN_USERS}\n"
         )

@@ -242,6 +242,7 @@ def main():
             "dataset_path": str(Path(args.data).resolve()),
             "dataset_sha256": dataset_hash,
             "enrollment_per_gesture": args.enroll,
+            "seed": args.seed,
             "training_head": "arcface",
             "arcface_scale": args.scale,
             "arcface_margin": args.margin,
@@ -267,6 +268,7 @@ def main():
         f.write("date_usage=split_only\n")
         f.write(f"dataset={Path(args.data).resolve()}\n")
         f.write(f"dataset_sha256={dataset_hash}\n")
+        f.write(f"seed={args.seed}\n")
         f.write(f"arcface_scale={args.scale}\narcface_margin={args.margin}\n")
         f.write(f"embedding_dim={args.embedding_dim}\n")
         f.write(f"best_epoch={best_epoch}\nbest_val_id_accuracy={best_val_acc:.6f}\n")

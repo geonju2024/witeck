@@ -46,6 +46,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from two_stage_common import (
     load_dataset,
+    file_sha256,
     fit_duration_stats,
     apply_duration_stats,
     fit_sequence_stats,
@@ -1656,9 +1657,15 @@ def main():
         default=7,
     )
 
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=SEED,
+    )
+
     args = parser.parse_args()
 
-    seed_everything()
+    seed_everything(args.seed)
 
     device = select_device()
 
@@ -1842,7 +1849,7 @@ def main():
     patience_count = 0
 
     rng = np.random.default_rng(
-        SEED
+        args.seed
     )
 
     print()
@@ -2156,6 +2163,8 @@ def main():
         / f"siamese_{args.architecture.replace('-', '_')}_1dcnn.pt"
     )
 
+    dataset_hash = file_sha256(args.data)
+
     torch.save(
         {
             "model_state_dict":
@@ -2167,8 +2176,11 @@ def main():
                     .items()
                 },
             "input_dim": D,
+            "seq_len": T,
             "embedding_dim":
                 args.embedding_dim,
+            "model_family":
+                "siamese",
             "architecture":
                 args.architecture,
             "encoder":
@@ -2215,6 +2227,12 @@ def main():
                 UNSEEN_USERS,
             "threshold":
                 threshold,
+            "enrollment_per_gesture":
+                args.enroll,
+            "dataset_path":
+                str(Path(args.data).expanduser().resolve()),
+            "dataset_sha256":
+                dataset_hash,
             "margin":
                 args.margin,
             "sequence_mean":
@@ -2227,6 +2245,8 @@ def main():
                 dur_std,
             "best_val_pair_loss":
                 best_val_loss,
+            "seed":
+                args.seed,
         },
         model_path,
     )
@@ -2278,6 +2298,20 @@ def main():
         )
 
         f.write(
+            "model_family=siamese\n"
+        )
+
+        f.write(
+            f"dataset="
+            f"{Path(args.data).expanduser().resolve()}\n"
+        )
+
+        f.write(
+            f"dataset_sha256="
+            f"{dataset_hash}\n"
+        )
+
+        f.write(
             f"train_users="
             f"{TRAIN_USERS}\n"
         )
@@ -2295,6 +2329,11 @@ def main():
         f.write(
             f"enrollment_per_gesture="
             f"{args.enroll}\n"
+        )
+
+        f.write(
+            f"seed="
+            f"{args.seed}\n"
         )
 
         f.write(

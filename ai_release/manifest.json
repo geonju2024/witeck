@@ -1,0 +1,6 @@
+{
+  "release": "shared-dual-head-v1.1.0-TEMPLATE",
+  "status": "UNFINALIZED",
+  "required_local_checkpoint": "output\\shared_dual_head\\seed_40\\shared_dual_head.pt",
+  "note": "Run finalize_release.py before sending to backend."
+}

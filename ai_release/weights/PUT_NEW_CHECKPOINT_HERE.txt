@@ -1,0 +1,3 @@
+Do not copy the old v1.0.0 weights here.
+finalize_release.py will copy output/shared_dual_head/seed_40/shared_dual_head.pt
+as weights/shared_dual_head_v1.pt.

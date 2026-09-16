@@ -1,0 +1,19 @@
+{
+  "model_version": "shared-dual-head-v1.1.0",
+  "input": {
+    "raw": "MediaPipe Hand 21 xyz points + tMs + camera width/height",
+    "sequence_length": 32,
+    "feature_dim": 127,
+    "feature_layout": "hand_xyz_63+hand_velocity_63+valid_mask_1",
+    "right_hand_only": true,
+    "minimum_input_frames": 8,
+    "minimum_valid_frames": 8,
+    "minimum_duration_ms": 750
+  },
+  "dual_head": {
+    "sequence_mean": "__FILLED_FROM_CHECKPOINT_BY_FINALIZE_RELEASE__",
+    "sequence_std": "__FILLED_FROM_CHECKPOINT_BY_FINALIZE_RELEASE__",
+    "duration_mean": "__FILLED_FROM_CHECKPOINT_BY_FINALIZE_RELEASE__",
+    "duration_std": "__FILLED_FROM_CHECKPOINT_BY_FINALIZE_RELEASE__"
+  }
+}

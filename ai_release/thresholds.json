@@ -1,0 +1,16 @@
+{
+  "release": "shared-dual-head-v1.1.0",
+  "selected_operating_point": "default",
+  "decision_rule": "gesture_score >= gesture_threshold AND user_score >= user_threshold",
+  "operating_points": {
+    "default": {
+      "gesture_threshold": 0.902031779,
+      "user_threshold": 0.342350125,
+      "source": "known-user validation calibration from seed 40 checkpoint"
+    }
+  },
+  "demo_relaxed": {
+    "status": "NOT_CALIBRATED",
+    "reason": "Do not derive a relaxed threshold from P08-P10 final-test results. Calibrate on development/validation scores only."
+  }
+}

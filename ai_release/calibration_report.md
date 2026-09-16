@@ -37,8 +37,19 @@ Trials: 7,275
 
 ## Relaxed demo operating point
 
-Not included yet.
+A relaxed demo operating point was calibrated using known-user validation data only.
 
-A second operating point must be selected from development/validation score distributions.
-It must not be tuned using P08-P10 final-test results, because doing so would contaminate
-the unseen-user evaluation.
+- Gesture threshold Tg: 0.902032
+- User threshold Tu: 0.293309
+
+Validation results:
+
+- Gesture FAR: 0.00%
+- Gesture FRR: 0.00%
+- User FAR: 4.76%
+- User FRR: 2.86%
+
+P08-P10 and other final-test users were not used to derive this operating point.
+
+This operating point is intended as a more permissive demo setting to reduce genuine rejection.
+It should not be interpreted as unseen-user or unseen-free-gesture performance.

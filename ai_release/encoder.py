@@ -18,7 +18,7 @@ except ImportError:
     from model_defs import SharedDualHead1DCNN
 
 
-MODEL_VERSION = "shared-dual-head-v1.1.0"
+MODEL_VERSION = "shared-dual-head-v1.1.1"
 EMBEDDING_DIM = 128
 
 _ROOT = Path(__file__).resolve().parent

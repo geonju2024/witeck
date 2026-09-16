@@ -19,7 +19,8 @@ MediaPipe 랜드마크(.npz)
     -> 실제 frame_times 기준 velocity 계산 (Δposition / Δtime)
     -> 위치와 velocity를 각각 T=32로 리샘플
 
-따라서 최종 feature 크기는 기존과 동일하다.
+기본 feature는 169차원이며, ``--hand-only``를 사용하면 앱에서 제공하는
+손 랜드마크만 사용한 127차원 feature를 만든다.
 
     Hand xyz        63
     Hand velocity   63   # 실제 시간 기준
@@ -28,6 +29,14 @@ MediaPipe 랜드마크(.npz)
     Valid mask       1
     -------------------
     Total           169 / frame
+
+    Hand-only mode
+    --------------
+    Hand xyz        63
+    Hand velocity   63
+    Valid mask       1
+    -------------------
+    Total           127 / frame
 
 영상 하나:
     [32, 169]
@@ -597,11 +606,12 @@ def normalize_pose(
 def features_from_npz(
     path,
     canonical_hand=True,
+    hand_only=False,
 ):
     """
     landmark npz 1개
     ->
-    feature vector [32*169],
+    feature vector [32*169] or [32*127],
     hand detection rate,
     hand side,
     duration_sec,
@@ -630,30 +640,33 @@ def features_from_npz(
         "hand_valid"
     ]
 
-    pose = z[
-        "pose"
-    ].astype(
-        np.float32,
-        copy=True,
-    )
+    pose = None
+    pose_valid = None
+    if not hand_only:
+        pose = z[
+            "pose"
+        ].astype(
+            np.float32,
+            copy=True,
+        )
 
-    pose_valid = z[
-        "pose_valid"
-    ]
+        pose_valid = z[
+            "pose_valid"
+        ]
 
-    pose[
-        :,
-        :,
-        :3,
-    ] = apply_aspect(
         pose[
             :,
             :,
             :3,
-        ],
-        W,
-        H,
-    )
+        ] = apply_aspect(
+            pose[
+                :,
+                :,
+                :3,
+            ],
+            W,
+            H,
+        )
 
     T = hand.shape[0]
 
@@ -758,36 +771,41 @@ def features_from_npz(
         h
     )
 
-    # Pose 결측 보간
-    p_raw, pose_ok = interp_missing_time(
-        pose,
-        pose_valid,
-        frame_times,
-    )
+    if not hand_only:
+        # Pose 결측 보간
+        p_raw, pose_ok = interp_missing_time(
+            pose,
+            pose_valid,
+            frame_times,
+        )
 
-    if pose_ok:
-        p = normalize_pose(
-            p_raw
-        )
-    else:
-        p = np.zeros(
-            (
-                T,
-                len(POSE_UPPER),
-                3,
-            ),
-            np.float32,
-        )
+        if pose_ok:
+            p = normalize_pose(
+                p_raw
+            )
+        else:
+            p = np.zeros(
+                (
+                    T,
+                    len(POSE_UPPER),
+                    3,
+                ),
+                np.float32,
+            )
 
     # 왼손 -> 오른손 기준 통일
     if (
         canonical_hand
         and side == 0
     ):
-        h, p = mirror_to_right(
-            h,
-            p,
-        )
+        if hand_only:
+            h = h.copy()
+            h[..., 0] *= -1.0
+        else:
+            h, p = mirror_to_right(
+                h,
+                p,
+            )
 
     # -----------------------------------------------------
     # 핵심 변경:
@@ -798,10 +816,11 @@ def features_from_npz(
         frame_times,
     )
 
-    vp = velocity_from_time(
-        p,
-        frame_times,
-    )
+    if not hand_only:
+        vp = velocity_from_time(
+            p,
+            frame_times,
+        )
 
     # -----------------------------------------------------
     # 모든 시계열을 같은 32개 실제 시간 위치로 리샘플
@@ -816,15 +835,16 @@ def features_from_npz(
         frame_times,
     )
 
-    p32 = resample_time(
-        p,
-        frame_times,
-    )
+    if not hand_only:
+        p32 = resample_time(
+            p,
+            frame_times,
+        )
 
-    vp32 = resample_time(
-        vp,
-        frame_times,
-    )
+        vp32 = resample_time(
+            vp,
+            frame_times,
+        )
 
     v32 = resample_time(
         hv.astype(
@@ -834,39 +854,24 @@ def features_from_npz(
     )
 
     # -----------------------------------------------------
-    # 기존과 동일한 169 features / frame
+    # 169 features/frame 또는 손 전용 127 features/frame
     # -----------------------------------------------------
-    feat = np.concatenate(
-        [
-            h32.reshape(
-                T_OUT,
-                -1,
-            ),       # 63
+    parts = [
+        h32.reshape(T_OUT, -1),   # 63
+        vh32.reshape(T_OUT, -1),  # 63, units/sec
+    ]
+    if not hand_only:
+        parts.extend(
+            [
+                p32.reshape(T_OUT, -1),   # 21
+                vp32.reshape(T_OUT, -1),  # 21, units/sec
+            ]
+        )
+    parts.append(v32)  # 1
+    feat = np.concatenate(parts, axis=1)
 
-            vh32.reshape(
-                T_OUT,
-                -1,
-            ),       # 63, units/sec
-
-            p32.reshape(
-                T_OUT,
-                -1,
-            ),       # 21
-
-            vp32.reshape(
-                T_OUT,
-                -1,
-            ),       # 21, units/sec
-
-            v32,     # 1
-        ],
-        axis=1,
-    )
-
-    assert feat.shape == (
-        T_OUT,
-        169,
-    ), feat.shape
+    expected_dim = 127 if hand_only else 169
+    assert feat.shape == (T_OUT, expected_dim), feat.shape
 
     return (
         feat.reshape(-1).astype(
@@ -951,6 +956,15 @@ def main():
         action="store_true",
         help=(
             "01번에서 max_frames 때문에 잘린 영상을 제외한다."
+        ),
+    )
+
+    ap.add_argument(
+        "--hand-only",
+        action="store_true",
+        help=(
+            "상체 pose를 제외하고 손 xyz, 손 velocity, valid mask만 사용한 "
+            "D=127 dataset을 만든다."
         ),
     )
 
@@ -1076,6 +1090,7 @@ def main():
             canonical_hand=(
                 not args.keep_hand_side
             ),
+            hand_only=args.hand_only,
         )
 
         if feat is None:
@@ -1251,6 +1266,14 @@ def main():
         velocity_mode=np.array(
             "real_time_units_per_second"
         ),
+
+        feature_layout=np.array(
+            "hand_xyz_63+hand_velocity_63+valid_mask_1"
+            if args.hand_only
+            else "hand_xyz_63+hand_velocity_63+pose_xyz_21+pose_velocity_21+valid_mask_1"
+        ),
+
+        hand_only=np.bool_(args.hand_only),
     )
 
     # -----------------------------------------------------

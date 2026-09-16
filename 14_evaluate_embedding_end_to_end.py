@@ -12,10 +12,18 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib
+import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+
+
+# Older architecture definitions are kept out of the project root.  Adding the
+# archive directory preserves the ability to evaluate historical checkpoints.
+ARCHIVED_EXPERIMENTS = Path(__file__).resolve().parent / "archive" / "experiments"
+if ARCHIVED_EXPERIMENTS.exists():
+    sys.path.append(str(ARCHIVED_EXPERIMENTS))
 
 from two_stage_common import (
     apply_duration_stats,
@@ -180,6 +188,28 @@ def load_model(checkpoint_path, current_hash, device):
             embedding_dim=int(ckpt["embedding_dim"]),
             seq_len=int(ckpt["seq_len"]),
             model_dim=int(ckpt.get("transformer_model_dim", 64)),
+        )
+    elif architecture == "phase-pool-supcon":
+        module = importlib.import_module("34_train_phase_pool_supcon")
+        model = module.PhasePoolSupCon1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+        )
+    elif architecture in {"position-expert-supcon", "velocity-expert-supcon"}:
+        module = importlib.import_module("36_train_feature_expert_supcon")
+        model = module.FeatureExpertSupCon1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
+            expert=str(ckpt["expert"]),
+        )
+    elif architecture == "hand-only-two-stream-stats-supcon":
+        module = importlib.import_module("41_train_hand_only_supcon")
+        model = module.HandOnlySupCon1DCNN(
+            input_dim=int(ckpt["input_dim"]),
+            num_classes=int(ckpt["num_classes"]),
+            embedding_dim=int(ckpt["embedding_dim"]),
         )
     else:
         model = Embedding1DCNN(

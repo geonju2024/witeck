@@ -821,3 +821,384 @@ User score
 > AI 모델 학습에 참여하지 않은 신규 사용자가 AI가 학습한 적 없는 자신만의 자유 제스처를 소수 횟수 등록해도, 모델을 다시 학습하지 않고 이후 동일 사용자를 인증할 수 있다.
 
 현재 Shared Dual-Head 실험은 기존 G1~G5 환경에서 이 구조의 가능성을 확인한 단계이며, 다음 핵심 단계는 자유 제스처 데이터셋을 이용한 Unseen User + Unseen Gesture 검증이다.
+
+Backend Release v1.1.1
+
+현재 백엔드 연동용 최종 배포 버전은 다음과 같다.
+
+shared-dual-head-v1.1.1
+
+최종 전달 파일:
+
+WITECK_AI_RELEASE_SHARED_DUAL_HEAD_v1.1.1.zip
+
+이 배포본은 기존 v1.0.0의 백엔드 인터페이스를 최대한 유지하면서 내부 인증 모델을 Shared Dual-Head 구조로 교체한 버전이다.
+
+포함 파일
+ai_release/
+├── __init__.py
+├── encoder.py
+├── features.py
+├── model_defs.py
+├── preprocess.json
+├── thresholds.json
+├── calibration_report.md
+├── manifest.json
+├── requirements.txt
+├── smoke_test.py
+└── weights/
+    └── shared_dual_head_v1.pt
+Backend 공개 API
+
+encoder.py에서 다음 API를 제공한다.
+
+load_model()
+
+embed_user()
+embed_gesture()
+
+embed_user_batch()
+embed_gesture_batch()
+
+embed_both()
+embed_both_batch()
+
+MODEL_VERSION
+
+Embedding dimension:
+
+Gesture embedding = 128-D
+User embedding    = 128-D
+
+두 embedding 모두 L2 normalization된 상태로 반환된다.
+
+따라서 백엔드에서는 등록 template과 cosine similarity를 계산하여 사용할 수 있다.
+
+입력 전처리
+
+새 릴리스에는 기존 v1.0.0에서 사용하던 raw MediaPipe landmark 전처리 front-end를 다시 포함했다.
+
+입력:
+
+raw MediaPipe hand landmarks
++
+timestamp
++
+camera width / height
++
+handedness
+
+전처리 과정:
+
+Raw landmark payload
+↓
+입력 검증
+↓
+21개 hand landmark parsing
+↓
+누락 frame 보간
+↓
+aspect ratio 보정
+↓
+wrist-relative coordinate 변환
+↓
+hand-size normalization
+↓
+velocity 계산
+↓
+32-frame resampling
+↓
+[32,127]
+
+최종 feature layout:
+
+hand_xyz       63
+hand_velocity  63
+valid_mask      1
+-----------------
+total          127
+입력 검증
+
+잘못된 입력이 모델에 그대로 들어가지 않도록 InvalidSequenceError 검증을 포함한다.
+
+주요 검증 항목:
+
+최소 입력 frame 수
+최소 valid frame 수
+최소 촬영 시간 750 ms
+camera width / height 존재 여부
+timestamp 유효성
+timestamp 증가 순서
+landmark shape 및 finite 값
+Right hand 여부
+
+따라서 0으로 채워진 임의 tensor를 직접 모델에 넣는 구조가 아니라, raw payload 단계에서 유효성 검사를 수행한다.
+
+Threading
+
+기존 백엔드 계약을 유지하기 위해 AI 모듈 내부에:
+
+threading.RLock
+
+을 사용한다.
+
+모델 load 및 forward 과정이 내부 lock으로 보호되므로, 백엔드에서 별도의 model-forward lock을 추가할 필요는 없다.
+
+Operating Points
+Default
+
+기본 운영점:
+
+Gesture threshold Tg = 0.902032
+User threshold Tu    = 0.342350
+
+최종 판정:
+
+gesture_score >= Tg
+AND
+user_score >= Tu
+
+→ Accept
+
+Validation 기준:
+
+Gesture FAR = 0.00%
+Gesture FRR = 0.00%
+
+User FAR = 4.05%
+User FRR = 4.29%
+Demo Relaxed
+
+시연 중 genuine rejection을 줄이기 위한 완화 운영점도 추가했다.
+
+Gesture threshold Tg = 0.902032
+User threshold Tu    = 0.293309
+
+Validation 기준:
+
+Gesture FAR = 0.00%
+Gesture FRR = 0.00%
+
+User FAR = 4.76%
+User FRR = 2.86%
+
+Gesture Head는 기본 threshold에서도 validation FAR/FRR이 모두 0%였기 때문에 threshold를 변경하지 않았다.
+
+User Head만:
+
+0.342350
+↓
+0.293309
+
+로 완화했다.
+
+이 운영점은:
+
+validation FAR <= 5%
+
+조건을 유지하면서 validation FRR을 최대한 낮추는 기준으로 산출했다.
+
+중요:
+
+P08~P10 final-test 결과는 threshold 산출에 사용하지 않았다.
+
+따라서 demo_relaxed는 known-user validation만을 이용해 calibration한 운영점이다.
+
+Current Evaluation Result
+
+P08~P10 unseen user 기준 평가:
+
+Enrollment = 3 takes
+Trials     = 7,275
+
+결과:
+
+Accuracy                    95.77%
+Balanced Accuracy           84.37%
+
+Genuine FRR                 28.04%
+Combined Attack FAR          3.22%
+
+Wrong-Gesture FAR            1.52%
+Same-Gesture Impostor FAR   17.34%
+Random Impostor FAR          0.13%
+
+현재 결과에서 가장 큰 개선은 Wrong-Gesture FAR이다.
+
+기존 Direct Template:
+
+37.84% ~ 58.70%
+
+Shared Dual-Head:
+
+1.52%
+
+로 크게 감소했다.
+
+다만 현재 주요 개선 대상은:
+
+Genuine FRR                 28.04%
+Same-Gesture Impostor FAR   17.34%
+
+이다.
+
+Backend Authentication Flow
+
+현재 1인 1개 개인 제스처 정책에서는 앱에서 gestureId를 보낼 필요가 없다.
+
+인증 흐름:
+
+App
+userId + raw landmark payload
+↓
+Backend
+userId 기준 template 조회
+↓
+AI Release
+features.py
+↓
+[32,127]
+↓
+Shared Dual-Head
+↓
+Gesture embedding [128]
++
+User embedding [128]
+↓
+Backend
+cosine similarity 계산
+↓
+Gesture threshold
++
+User threshold
+↓
+최종 인증
+
+사용자별 저장 데이터 예:
+
+userId
+├── gesture_template [128]
+└── user_template    [128]
+Enrollment
+
+신규 사용자 등록 시 약 3회의 제스처를 촬영한다.
+
+Take 1
+Take 2
+Take 3
+↓
+Gesture embedding 3개
+User embedding 3개
+↓
+각각 평균
+↓
+Gesture Template
+User Template 저장
+
+신규 사용자 등록 과정에서는:
+
+모델 재학습 X
+Backpropagation X
+Weight update X
+
+이며 template만 생성한다.
+
+Release Integrity
+
+최종 릴리스는 finalize_release_v1_1_1.py로 생성한다.
+
+빌드 순서:
+
+checkpoint 복사
+↓
+preprocess 통계 반영
+↓
+threshold 반영
+↓
+smoke test
+↓
+__pycache__ / *.pyc 삭제
+↓
+manifest hash 생성
+↓
+ZIP 생성
+
+__pycache__ 및 .pyc 파일은 최종 ZIP과 manifest에서 제외된다.
+
+이를 통해 smoke test 이후 생성된 Python bytecode 때문에 manifest hash 검증이 실패하는 문제를 방지한다.
+
+Current Limitation
+
+현재 shared_dual_head_v1.pt checkpoint는 아직 기존:
+
+G1
+G2
+G3
+G4
+G5
+
+제스처 데이터를 기반으로 학습되어 있다.
+
+따라서 현재 결과는:
+
+Unseen User
++
+Known Gesture
+
+조건을 평가한 결과이다.
+
+아직 최종 목표인:
+
+Unseen User
++
+Unseen Free Gesture
++
+Few-shot Enrollment
++
+No Retraining
+
+을 완전히 검증한 상태는 아니다.
+
+Next Retraining Stage
+
+다음 단계에서는 자유 제스처 데이터를 추가 수집한다.
+
+예정 흐름:
+
+자유 제스처 데이터 수집
+↓
+전처리 및 dataset 구성
+↓
+기존 데이터 + Development 자유 제스처 데이터
+↓
+Shared Dual-Head 재학습
+↓
+Validation에서 Tg / Tu 재calibration
+↓
+새 ai_release 생성
+↓
+완전 신규 사용자 Final Test
+
+자유 제스처 모델로 재학습한 뒤에도 백엔드 공개 API 구조는 최대한 동일하게 유지할 예정이다.
+
+즉:
+
+embed_user()
+embed_gesture()
+embed_user_batch()
+embed_gesture_batch()
+
+와:
+
+128-D embedding
+cosine similarity
+Tg / Tu
+
+구조는 유지하고, 이후 릴리스에서는 주로 다음 항목이 교체된다.
+
+weights
+preprocess normalization statistics
+thresholds
+calibration report
+
+따라서 백엔드는 현재 v1.1.1 기준으로 연동을 진행하고, 이후 자유 제스처 모델이 확정되면 새로운 release 파일로 교체하는 방식으로 진행할 수 있다.

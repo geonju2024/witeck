@@ -107,16 +107,6 @@ Gesture Embedding과 User Embedding을 하나의 Backbone에서 동시에 학습
 
 ---
 
-### `45_train_shared_dual_head_pseudoval.py`
-
-Pseudo-Unseen Validation 실험을 위한 학습 코드이다.
-
-기존 단순 Random Split보다 실제 신규 사용자 환경에 가까운 조건에서 일반화 성능을 확인하기 위해 사용한다.
-
-Seed를 변경하여 여러 번 학습한 뒤 결과 변동도 함께 확인할 수 있다.
-
----
-
 ### `46_evaluate_shared_dual_head.py`
 
 Shared Dual Head 모델의 기본 인증 성능 평가 코드이다.
@@ -131,16 +121,6 @@ Wrong Gesture
 Same-Gesture Impostor
 Random Impostor
 ```
-
----
-
-### `46_evaluate_shared_dual_head_unseen_g5.py`
-
-실제 서비스 환경에 가까운 일반화 성능을 확인하기 위한 평가 코드이다.
-
-특히 기존 학습 데이터와 다른 조건에서 Gesture/User Head가 얼마나 안정적으로 동작하는지 확인한다.
-
-본 브랜치에서 가장 중요한 평가 코드 중 하나이다.
 
 ---
 

@@ -455,3 +455,51 @@ def torch_load_compat(path, device):
         return torch.load(path, map_location=device, weights_only=False)
     except TypeError:
         return torch.load(path, map_location=device)
+
+
+def derive_gesture_owners(meta):
+    """Map each gesture to the performer who authored it.
+
+    The owner is the performer whose samples for that gesture carry
+    role == "own".  A gesture nobody authored maps to "".
+    """
+
+    gesture = meta["gesture"]
+    performer = meta["performer"]
+    role = meta["role"]
+
+    owners = {}
+
+    for g in np.unique(gesture):
+        authored = np.unique(
+            performer[(gesture == g) & (role == "own")]
+        )
+        owners[str(g)] = (
+            str(authored[0]) if len(authored) == 1 else ""
+        )
+
+    return owners
+
+
+def derive_imitation_targets(meta, owners=None):
+    """Who each sample is trying to look like.
+
+    Returns "" for a performer's own gesture, otherwise the author of the
+    gesture being copied.  Self-imitation stays labelled with the performer,
+    so callers building attack pairs must still require a different
+    performer on the two sides.
+    """
+
+    if owners is None:
+        owners = derive_gesture_owners(meta)
+
+    gesture = meta["gesture"]
+    role = meta["role"]
+
+    return np.asarray(
+        [
+            "" if r == "own" else owners.get(str(g), "")
+            for g, r in zip(gesture, role)
+        ],
+        dtype="<U16",
+    )

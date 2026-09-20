@@ -31,6 +31,7 @@ from torch.utils.data import DataLoader, TensorDataset
 train_base = importlib.import_module("45_train_shared_dual_head")
 legacy = importlib.import_module("16_train_supcon_embedding")
 base = importlib.import_module("08_train_embedding")
+common = importlib.import_module("two_stage_common")
 
 SharedDualHead1DCNN = train_base.SharedDualHead1DCNN
 DEFAULT_TRAIN_USERS = list(legacy.TRAIN_USERS)
@@ -80,6 +81,9 @@ class ServiceMetricBatchSampler:
         batch_size: int = 48,
         seed: int = 42,
         batches_per_epoch: int | None = None,
+        performer: np.ndarray | None = None,
+        imitation_target: np.ndarray | None = None,
+        use_imitation_negatives: bool = False,
     ) -> None:
         self.user_y = np.asarray(user_y)
         self.gesture_y = np.asarray(gesture_y)
@@ -87,14 +91,40 @@ class ServiceMetricBatchSampler:
         self.batch_size = int(batch_size)
         self.seed = int(seed)
         self.epoch = 0
+        self.use_imitation_negatives = bool(use_imitation_negatives)
 
         n = len(self.user_y)
         if not (n == len(self.gesture_y) == len(self.session)):
             raise ValueError("user/gesture/session arrays must have equal length")
         if n < 2:
             raise ValueError("metric sampler needs at least two samples")
-        if self.batch_size < 5:
-            raise ValueError("batch_size must be at least 5")
+
+        if self.use_imitation_negatives:
+            if performer is None or imitation_target is None:
+                raise ValueError(
+                    "imitation negatives need performer and imitation_target"
+                )
+            self.performer = np.asarray(performer).astype(str)
+            self.imitation_target = np.asarray(imitation_target).astype(str)
+            if not (n == len(self.performer) == len(self.imitation_target)):
+                raise ValueError(
+                    "performer/imitation_target must match the other arrays"
+                )
+            self.role_names = (
+                "user_positive",
+                "imitation_negative",
+                "user_hard_negative",
+                "gesture_positive",
+                "gesture_hard_negative",
+            )
+        else:
+            self.performer = None
+            self.imitation_target = None
+            self.role_names = self.ROLE_NAMES
+
+        minimum_batch = 1 + len(self.role_names)
+        if self.batch_size < minimum_batch:
+            raise ValueError(f"batch_size must be at least {minimum_batch}")
 
         self.indices = np.arange(n, dtype=np.int64)
         self.batches_per_epoch = (
@@ -132,6 +162,20 @@ class ServiceMetricBatchSampler:
             if len(fallback):
                 return fallback, True
             return self.indices[not_self & (self.user_y == u)], True
+
+        if role == "imitation_negative":
+            # Someone else deliberately copying this anchor's performer.  The
+            # gesture is left free on purpose: the user head has to reject an
+            # impersonator whichever gesture they attempt.  No fallback, so a
+            # missing count means the dataset holds no such attack.
+            target = self.performer[anchor]
+            return (
+                self.indices[
+                    (self.performer != target)
+                    & (self.imitation_target == target)
+                ],
+                False,
+            )
 
         if role == "user_hard_negative":
             preferred = self.indices[
@@ -179,7 +223,7 @@ class ServiceMetricBatchSampler:
                     if len(batch) >= self.batch_size:
                         break
 
-                for role in self.ROLE_NAMES:
+                for role in self.role_names:
                     candidates, used_fallback = self._candidates(anchor, role)
                     candidates = np.asarray(
                         [x for x in candidates.tolist() if int(x) not in in_batch],
@@ -206,7 +250,7 @@ class ServiceMetricBatchSampler:
         self.last_epoch_stats = dict(stats)
         fields = " ".join(
             f"{name}={stats.get(name, 0)}"
-            for name in ("anchor",) + self.ROLE_NAMES
+            for name in ("anchor",) + self.role_names
         )
         fallbacks = sum(
             value for name, value in stats.items() if name.startswith("fallback_")
@@ -229,6 +273,9 @@ def make_metric_loader(
     session: np.ndarray,
     batch_size: int,
     seed: int,
+    performer: np.ndarray | None = None,
+    imitation_target: np.ndarray | None = None,
+    use_imitation_negatives: bool = False,
 ) -> DataLoader:
     dataset = TensorDataset(
         torch.from_numpy(X).float(),
@@ -242,6 +289,9 @@ def make_metric_loader(
         session=session,
         batch_size=batch_size,
         seed=seed,
+        performer=performer,
+        imitation_target=imitation_target,
+        use_imitation_negatives=use_imitation_negatives,
     )
     return DataLoader(dataset, batch_sampler=sampler, num_workers=0)
 
@@ -484,6 +534,15 @@ def main() -> None:
             "Use this only for an unseen-gesture proxy experiment."
         ),
     )
+    parser.add_argument(
+        "--imitation-negatives",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Put a real impersonator of the anchor's performer in the batch. "
+            "Pass --no-imitation-negatives to reproduce the v1.0.0 sampler."
+        ),
+    )
     args = parser.parse_args()
 
     train_users = parse_id_list(args.train_users)
@@ -526,6 +585,9 @@ def main() -> None:
     if np.any(user_y[train_idx] < 0) or np.any(user_y[val_idx] < 0):
         raise RuntimeError("Train/validation split contains an unmapped user")
 
+    gesture_owners = common.derive_gesture_owners(meta)
+    imitation_target = common.derive_imitation_targets(meta, gesture_owners)
+
     train_loader = make_metric_loader(
         X_norm[train_idx],
         duration_norm[train_idx],
@@ -534,6 +596,9 @@ def main() -> None:
         meta["session"][train_idx],
         args.batch_size,
         args.seed,
+        performer=meta["performer"][train_idx],
+        imitation_target=imitation_target[train_idx],
+        use_imitation_negatives=args.imitation_negatives,
     )
     val_loader = legacy.make_loader(
         X_norm[val_idx],
@@ -562,6 +627,17 @@ def main() -> None:
     print(f"heldout_gesture={args.heldout_gesture}")
     print(f"weights={weights} margin={args.triplet_margin}")
     print("date/session usage: sampler and split only; never a model feature")
+    print(f"gesture_owners={gesture_owners}")
+    if args.imitation_negatives:
+        train_performer = meta["performer"][train_idx]
+        attacked = np.isin(train_performer, imitation_target[train_idx])
+        print(
+            "imitation negatives: ON "
+            f"({int(attacked.sum())}/{len(train_idx)} training samples "
+            "belong to a performer somebody else imitates)"
+        )
+    else:
+        print("imitation negatives: OFF (v1.0.0 sampler)")
 
     best_val_loss = float("inf")
     best_state = None
@@ -679,6 +755,13 @@ def main() -> None:
         "sampler": "service_metric_anchor_four_roles",
         "user_positive_rule": "same_user_prefer_different_gesture_and_session",
         "user_hard_negative_rule": "different_user_prefer_same_gesture",
+        "imitation_negatives": bool(args.imitation_negatives),
+        "imitation_negative_rule": (
+            "different_performer_whose_imitation_target_is_the_anchor_performer"
+            if args.imitation_negatives
+            else None
+        ),
+        "gesture_owners": gesture_owners,
         "gesture_positive_rule": "same_gesture_prefer_different_session",
         "gesture_hard_negative_rule": "same_user_different_gesture",
         "threshold_calibration": "train_templates_vs_heldout_sessions_of_train_users",
@@ -701,6 +784,7 @@ def main() -> None:
                 f"train_users={train_users}",
                 f"untouched_final_users={unseen_users}",
                 f"heldout_gesture={args.heldout_gesture}",
+                f"imitation_negatives={args.imitation_negatives}",
                 f"loss_weights={weights}",
                 f"triplet_margin={args.triplet_margin}",
                 f"best_epoch={best_epoch}",

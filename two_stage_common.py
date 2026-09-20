@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import random
+import re
 from pathlib import Path
 
 import numpy as np
@@ -93,12 +94,7 @@ def load_dataset(path: str):
     X_seq = X_flat.reshape(len(X_flat), T, D)
     duration = z["duration_sec"].astype(np.float32).reshape(-1)
 
-    meta = {
-        "gesture": z["gesture"].astype(str),
-        "performer": z["performer"].astype(str),
-        "session": z["session"].astype(str),
-        "role": z["role"].astype(str),
-    }
+    meta = build_meta(z)
 
     return X_flat, X_seq, duration, meta, T, D
 
@@ -457,6 +453,27 @@ def torch_load_compat(path, device):
         return torch.load(path, map_location=device)
 
 
+METADATA_VERSION = 2
+
+#: Columns the mobile capture is expected to add.  They are part of the schema
+#: already so a richer NPZ drops in without a code change; until one arrives
+#: describe_metadata() reports them as empty and require_real() refuses them.
+_PLANNED_COLUMNS = (
+    ("source_clip_id", ""),
+    ("device_id", ""),
+    ("capture_env", ""),
+    ("exposure_level", -1),
+    ("enroll_eligible", True),
+)
+
+
+def _trial_index(path) -> int:
+    """Take the take number out of a clip name, -1 when there is none."""
+
+    match = re.search(r"_(\d+)\.\w+$", str(path))
+    return int(match.group(1)) if match else -1
+
+
 def derive_gesture_owners(meta):
     """Map each gesture to the performer who authored it.
 
@@ -485,9 +502,9 @@ def derive_imitation_targets(meta, owners=None):
     """Who each sample is trying to look like.
 
     Returns "" for a performer's own gesture, otherwise the author of the
-    gesture being copied.  Self-imitation stays labelled with the performer,
-    so callers building attack pairs must still require a different
-    performer on the two sides.
+    gesture being copied.  Self-imitation keeps the performer as the target,
+    so callers building attack pairs must still require a different performer
+    on the two sides.
     """
 
     if owners is None:
@@ -503,3 +520,204 @@ def derive_imitation_targets(meta, owners=None):
         ],
         dtype="<U16",
     )
+
+
+def build_meta(z):
+    """Build the per-sample metadata table and record where each column came from.
+
+    Every column is tagged "npz" when it was read from the file, "derived" when
+    it was computed from other columns, and "default" when the dataset has none
+    and a placeholder stands in.  require_real() reads those tags so a
+    placeholder never reaches a results table dressed up as a measurement.
+    """
+
+    n = int(len(z["gesture"]))
+    provenance = {}
+
+    def column(key, default, dtype=None, required=False):
+        value = None
+        if key in z.files:
+            candidate = np.asarray(z[key])
+            if candidate.ndim == 1 and len(candidate) == n:
+                value = candidate
+
+        if value is None:
+            if required:
+                raise ValueError(
+                    f"dataset.npz is missing the required column {key!r}"
+                )
+            provenance[key] = "default"
+            value = np.full(n, default)
+        else:
+            provenance[key] = "npz"
+
+        if dtype == "str":
+            return value.astype(str)
+        if dtype is not None:
+            return value.astype(dtype)
+        return value
+
+    meta = {
+        "gesture": column("gesture", "", "str", required=True),
+        "performer": column("performer", "", "str", required=True),
+        "session": column("session", "", "str", required=True),
+        # A dataset with no roles reads as everybody performing their own
+        # gesture, which leaves imitation_target empty rather than wrong.
+        "role": column("role", "own", "str"),
+        "hand": column("hand", "", "str"),
+        "duration_sec": column("duration_sec", np.nan, "f4"),
+        "fps": column("fps", np.nan, "f4"),
+        "truncated": column("truncated", False, "bool"),
+        "clip_path": column("name", "", "str"),
+    }
+    provenance["clip_path"] = provenance.pop("name")
+
+    meta["trial_index"] = np.asarray(
+        [_trial_index(path) for path in meta["clip_path"]],
+        dtype="i4",
+    )
+    provenance["trial_index"] = "derived"
+
+    owners = derive_gesture_owners(meta)
+    meta["gesture_owner"] = np.asarray(
+        [owners.get(str(g), "") for g in meta["gesture"]],
+        dtype="<U16",
+    )
+    meta["imitation_target"] = derive_imitation_targets(meta, owners)
+    provenance["gesture_owner"] = "derived"
+    provenance["imitation_target"] = "derived"
+
+    for key, default in _PLANNED_COLUMNS:
+        meta[key] = column(key, default)
+
+    meta["attack_type"] = column("attack_type", "", "str")
+    if provenance["attack_type"] == "default":
+        # role says "own" or "copied somebody"; it never says how the copy was
+        # made, so the placeholder stays deliberately vague.
+        meta["attack_type"] = np.where(
+            meta["role"] == "own", "own", "imitation_unspecified"
+        )
+        provenance["attack_type"] = "derived"
+
+    meta["subject_uid"] = column("subject_uid", "", "str")
+    if provenance["subject_uid"] == "default":
+        meta["subject_uid"] = meta["performer"].copy()
+        provenance["subject_uid"] = "derived"
+
+    meta["_schema"] = {
+        "version": METADATA_VERSION,
+        "n": n,
+        "gesture_owners": owners,
+        "provenance": provenance,
+    }
+
+    return meta
+
+
+def describe_metadata(meta) -> str:
+    """Print one line per column saying whether it is real, derived or empty.
+
+    role sat in this dict unread for a long time because nothing ever
+    announced it was there.  This is what announces it.
+    """
+
+    schema = meta["_schema"]
+    label = {"npz": "real", "derived": "derived", "default": "EMPTY"}
+
+    lines = [
+        f"metadata v{schema['version']}  "
+        f"{schema['n']} samples  "
+        f"{len(schema['provenance'])} columns",
+        f"{'column':<18}{'source':<10}{'dtype':<10}example",
+        "-" * 70,
+    ]
+
+    for key, source in schema["provenance"].items():
+        value = meta[key]
+        example = ", ".join(str(x) for x in np.unique(value)[:3])
+        lines.append(
+            f"{key:<18}{label[source]:<10}{str(value.dtype):<10}{example[:30]}"
+        )
+
+    empty = [
+        key
+        for key, source in schema["provenance"].items()
+        if source == "default"
+    ]
+    if empty:
+        lines.append(
+            "empty columns, nothing may be reported by them: " + ", ".join(empty)
+        )
+
+    text = "\n".join(lines)
+    print(text)
+    return text
+
+
+def validate_metadata(meta) -> list[str]:
+    """Return readable warnings about metadata that will trip callers up."""
+
+    schema = meta["_schema"]
+    warnings = []
+
+    self_imitation = (
+        meta["imitation_target"] == meta["performer"]
+    ) & (meta["imitation_target"] != "")
+
+    if self_imitation.any():
+        pairs = sorted(
+            set(
+                zip(
+                    meta["performer"][self_imitation].tolist(),
+                    meta["gesture"][self_imitation].tolist(),
+                )
+            )
+        )
+        warnings.append(
+            f"{int(self_imitation.sum())} samples imitate their own performer "
+            f"({', '.join('/'.join(pair) for pair in pairs)}); attack pairs "
+            "must require a different performer on each side"
+        )
+
+    ownerless = sorted(
+        g for g, owner in schema["gesture_owners"].items() if not owner
+    )
+    if ownerless:
+        warnings.append(
+            f"gesture(s) {', '.join(ownerless)} have no single author, so "
+            "imitation_target stays empty for them"
+        )
+
+    undated = [
+        s for s in np.unique(meta["session"]).tolist() if not str(s).isdigit()
+    ]
+    if undated:
+        warnings.append(
+            f"session id(s) {', '.join(map(str, undated[:5]))} are not "
+            "date-like, so a chronological split cannot order them"
+        )
+
+    return warnings
+
+
+def require_real(meta, *columns) -> None:
+    """Raise unless every named column was really read from the dataset.
+
+    Call this before reporting a number broken down by that column.  A table of
+    FAR by attack_type built on a placeholder looks exactly like a table of FAR
+    by attack_type built on data.
+    """
+
+    provenance = meta["_schema"]["provenance"]
+    unusable = {
+        key: provenance.get(key, "missing")
+        for key in columns
+        if provenance.get(key) != "npz"
+    }
+
+    if unusable:
+        detail = ", ".join(f"{k}={v}" for k, v in sorted(unusable.items()))
+        raise ValueError(
+            f"cannot report by {detail}: the dataset does not carry these "
+            "columns, so the breakdown would describe placeholders"
+        )

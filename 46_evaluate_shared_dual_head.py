@@ -35,6 +35,7 @@ import torch
 train_mod = importlib.import_module("45_train_shared_dual_head")
 legacy = importlib.import_module("16_train_supcon_embedding")
 base = importlib.import_module("08_train_embedding")
+common = importlib.import_module("two_stage_common")
 
 SharedDualHead1DCNN = train_mod.SharedDualHead1DCNN
 
@@ -196,6 +197,9 @@ def main() -> None:
         device = torch.device("cpu")
 
     _, X_seq, duration, meta, T, D = legacy.load_dataset(args.data)
+    common.describe_metadata(meta)
+    for warning in common.validate_metadata(meta):
+        print(f"[metadata] {warning}")
 
     seq_mean = np.asarray(checkpoint["sequence_mean"])
     seq_std = np.asarray(checkpoint["sequence_std"])

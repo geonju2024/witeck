@@ -34,6 +34,7 @@ import torch.nn.functional as F
 
 legacy = importlib.import_module("16_train_supcon_embedding")
 base = importlib.import_module("08_train_embedding")
+common = importlib.import_module("two_stage_common")
 
 DEFAULT_TRAIN_USERS = list(legacy.TRAIN_USERS)
 DEFAULT_UNSEEN_USERS = list(legacy.UNSEEN_USERS)
@@ -640,6 +641,9 @@ def main() -> None:
         device = torch.device("cpu")
 
     _, X_seq, duration, meta, T, D = legacy.load_dataset(args.data)
+    common.describe_metadata(meta)
+    for warning in common.validate_metadata(meta):
+        print(f"[metadata] {warning}")
 
     train_idx, val_idx = base.chronological_user_split(
         meta,

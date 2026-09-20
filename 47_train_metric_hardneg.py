@@ -557,6 +557,9 @@ def main() -> None:
         device = torch.device("cpu")
 
     _, X_seq, duration, meta, T, D = legacy.load_dataset(args.data)
+    common.describe_metadata(meta)
+    for warning in common.validate_metadata(meta):
+        print(f"[metadata] {warning}")
     train_idx, val_idx = base.chronological_user_split(meta, train_users)
     if args.heldout_gesture:
         train_idx = train_idx[meta["gesture"][train_idx] != args.heldout_gesture]
@@ -585,8 +588,8 @@ def main() -> None:
     if np.any(user_y[train_idx] < 0) or np.any(user_y[val_idx] < 0):
         raise RuntimeError("Train/validation split contains an unmapped user")
 
-    gesture_owners = common.derive_gesture_owners(meta)
-    imitation_target = common.derive_imitation_targets(meta, gesture_owners)
+    gesture_owners = meta["_schema"]["gesture_owners"]
+    imitation_target = meta["imitation_target"]
 
     train_loader = make_metric_loader(
         X_norm[train_idx],

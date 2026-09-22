@@ -523,6 +523,15 @@ def main() -> None:
     parser.add_argument("--gesture-triplet-weight", type=float, default=0.50)
     parser.add_argument("--enroll", type=int, default=3)
     parser.add_argument("--patience", type=int, default=8)
+    parser.add_argument(
+        "--selection-metric",
+        choices=("total_loss", "user_metric"),
+        default="total_loss",
+        help=(
+            "Early-stopping checkpoint criterion. user_metric uses only "
+            "user SupCon + user triplet validation losses."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-users", default=",".join(DEFAULT_TRAIN_USERS))
     parser.add_argument("--unseen-users", default=",".join(DEFAULT_UNSEEN_USERS))
@@ -642,6 +651,7 @@ def main() -> None:
     else:
         print("imitation negatives: OFF (v1.0.0 sampler)")
 
+    best_selection_value = float("inf")
     best_val_loss = float("inf")
     best_state = None
     best_epoch = 0
@@ -670,7 +680,16 @@ def main() -> None:
         print(f"Epoch {epoch:02d} | {format_epoch('train', train_metrics)}")
         print(f"           | {format_epoch('val  ', val_metrics)}")
 
-        if val_metrics["loss"] < best_val_loss:
+        if args.selection_metric == "user_metric":
+            selection_value = (
+                weights["user_supcon"] * val_metrics["user_supcon"]
+                + weights["user_triplet"] * val_metrics["user_triplet"]
+            )
+        else:
+            selection_value = val_metrics["loss"]
+
+        if selection_value < best_selection_value:
+            best_selection_value = selection_value
             best_val_loss = val_metrics["loss"]
             best_val_accuracy = val_metrics["accuracy"]
             best_epoch = epoch
@@ -725,14 +744,26 @@ def main() -> None:
         "model_state_dict": {
             key: value.detach().cpu() for key, value in model.state_dict().items()
         },
-        "architecture": "hand-only-shared-two-stream-dual-head",
-        "experiment": "service-metric-hard-negative-v1",
+        "architecture": getattr(
+            model,
+            "architecture_name",
+            "hand-only-shared-two-stream-dual-head",
+        ),
+        "experiment": getattr(
+            model,
+            "experiment_name",
+            "service-metric-hard-negative-v1",
+        ),
         "input_dim": D,
         "seq_len": T,
         "embedding_dim": args.embedding_dim,
         "feature_layout": "hand_xyz_63+hand_velocity_63+valid_mask_1",
         "streams": ["hand_position", "hand_velocity"],
-        "pooling": "per_stream_mean+std",
+        "pooling": getattr(
+            model,
+            "pooling_name",
+            "per_stream_mean+std",
+        ),
         "valid_mask_usage": "excluded_from_identity_input",
         "parameter_count": parameter_count,
         "train_users": train_users,
@@ -771,6 +802,8 @@ def main() -> None:
         "heldout_gesture": args.heldout_gesture,
         "best_epoch": best_epoch,
         "stopped_epoch": stopped_epoch,
+        "selection_metric": args.selection_metric,
+        "best_selection_value": float(best_selection_value),
         "best_val_loss": float(best_val_loss),
         "best_val_id_accuracy": float(best_val_accuracy),
     }
@@ -792,6 +825,8 @@ def main() -> None:
                 f"triplet_margin={args.triplet_margin}",
                 f"best_epoch={best_epoch}",
                 f"stopped_epoch={stopped_epoch}",
+                f"selection_metric={args.selection_metric}",
+                f"best_selection_value={best_selection_value:.6f}",
                 f"best_val_loss={best_val_loss:.6f}",
                 f"best_val_id_accuracy={best_val_accuracy:.6f}",
                 f"gesture_validation_eer={gesture_eer:.6f}",

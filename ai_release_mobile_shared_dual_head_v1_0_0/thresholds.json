@@ -1,0 +1,7 @@
+{
+  "scheme": "checkpoint-validation-eer",
+  "gesture_threshold": 0.937420845,
+  "user_threshold": 0.824398994,
+  "final_rule": "AND",
+  "warning": "Do not reuse these thresholds with a different checkpoint"
+}

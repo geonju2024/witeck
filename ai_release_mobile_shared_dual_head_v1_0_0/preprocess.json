@@ -1,0 +1,16 @@
+{
+  "sequence_length": 32,
+  "feature_dim": 127,
+  "feature_layout": "hand_xyz_63+hand_velocity_63+valid_mask_1",
+  "position_normalization": "aspect correction, wrist centering, wrist-to-middle-MCP XY scale",
+  "canonical_hand": "left is mirrored to right when handedness is available",
+  "velocity": "normalized coordinate per second using detected-frame timestamps before resampling",
+  "duration": "total_frames / fps",
+  "stabilization": {
+    "condition": "same frame has abs(position)>10 and abs(velocity)>100",
+    "position_clip": 10.0,
+    "velocity_clip": 100.0
+  },
+  "minimum_detected_frames": 8,
+  "normalization_statistics": "stored inside weights/shared_dual_head.pt"
+}

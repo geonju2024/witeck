@@ -1,0 +1,33 @@
+WITECK Shared Backbone + Dual Embedding Head
+architecture=hand-only-shared-two-stream-dual-head
+device=cpu
+dataset=/Users/gimtaelin/Downloads/witeck-main/dataset_G1_G24_hand_only_2902_stabilized_p10_v100_20260923.npz
+train_users=['P01', 'P02', 'P03', 'P04', 'P05', 'P06', 'P07']
+unseen_users=['P08', 'P09', 'P10']
+parameter_count=149351
+best_epoch=14
+stopped_epoch=22
+best_val_loss=3.101173
+best_val_id_accuracy=0.478571
+
+[Gesture Head]
+threshold=0.937420845
+validation_eer=0.058036
+validation_far=0.058929
+validation_frr=0.057143
+positive_rule=same_gesture_id
+negative_calibration=same_user_and_different_gesture
+
+[User Head]
+threshold=0.824398994
+validation_eer=0.142857
+validation_far=0.142857
+validation_frr=0.142857
+positive_rule=same_user
+negative_calibration=different_user_and_same_gesture_when_available
+
+[Final Decision]
+accept = gesture_score >= gesture_threshold AND user_score >= user_threshold
+
+NOTE: final unseen-user/unseen-gesture evaluation belongs in
+46_evaluate_shared_dual_head.py and must not tune these thresholds.

@@ -1,0 +1,12 @@
+{
+  "model_version": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
+  "architecture": "hand-only-shared-two-stream-dual-head",
+  "input_shape": [32, 127],
+  "embedding_dim_per_head": 128,
+  "heads": ["gesture", "user"],
+  "enrollment_takes": 3,
+  "final_rule": "gesture_score >= gesture_threshold AND user_score >= user_threshold",
+  "candidate_checkpoint": "CPU seed 42 selected by lowest User validation EER among seeds 40-44",
+  "evaluation_scope": "P08-P10 enroll G5; leakage-safe non-training impostors",
+  "known_limit": "Unseen-user plus arbitrary unseen-personal-gesture live performance is not yet directly validated"
+}

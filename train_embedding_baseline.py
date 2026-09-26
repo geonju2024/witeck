@@ -1,5 +1,5 @@
 """
-08_train_embedding.py
+train_embedding_baseline.py
 
 First embedding-based unseen-user authentication experiment.
 
@@ -39,7 +39,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-from two_stage_common import (
+from model_utils import (
     load_dataset,
     file_sha256,
     fit_duration_stats,
@@ -758,7 +758,7 @@ def main():
     default_data = (
         Path(external_root) / "derived" / "dataset.npz"
         if external_root
-        else project_dir / "dataset" / "dataset_1955_recent8_updated_20260905.npz"
+        else project_dir / "data" / "processed" / "witeck_g1_g5_hand_only_v1.npz"
     )
 
     parser.add_argument(

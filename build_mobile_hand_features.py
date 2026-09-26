@@ -5,7 +5,7 @@ import numpy as np
 
 
 INPUT_ROOT = Path("data/AH650_landmarks_th03_cpu")
-OUTPUT_PATH = Path("dataset_AH650_G6_G24_hand_only_th03.npz")
+OUTPUT_PATH = Path("data/processed/ah650_g6_g24_hand_only_v1.npz")
 
 T_OUT = 32
 WRIST = 0

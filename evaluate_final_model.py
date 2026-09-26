@@ -34,10 +34,10 @@ import torch
 from sklearn.metrics import roc_auc_score
 
 
-train_mod = importlib.import_module("45_train_shared_dual_head")
-legacy = importlib.import_module("16_train_supcon_embedding")
-base = importlib.import_module("08_train_embedding")
-common = importlib.import_module("two_stage_common")
+train_mod = importlib.import_module("shared_dual_head_model")
+legacy = importlib.import_module("train_supcon_embedding")
+base = importlib.import_module("train_embedding_baseline")
+common = importlib.import_module("model_utils")
 
 SharedDualHead1DCNN = train_mod.SharedDualHead1DCNN
 
@@ -71,7 +71,7 @@ def selected_attack_pool(
     """Return identities allowed to act as impostors."""
 
     if scheme == "nontrain":
-        return [p for p in all_performers if p not in train_users]
+        return [p for p in all_performers if p not in train_users and p != "AH"]
     if scheme == "train":
         return [p for p in all_performers if p in train_users]
     if scheme == "all":
@@ -86,20 +86,9 @@ def build_model_from_checkpoint(checkpoint: dict):
         "architecture",
         "hand-only-shared-two-stream-dual-head",
     )
-    if architecture == "hand-only-shared-two-stream-dual-head":
-        model_class = SharedDualHead1DCNN
-    elif architecture == "hand-only-partial-shared-temporal-user-dual-head":
-        temporal_mod = importlib.import_module(
-            "49_train_temporal_user_dual_head"
-        )
-        model_class = temporal_mod.TemporalUserDualHead1DCNN
-    elif architecture == "hand-only-partial-shared-separate-stats-dual-head":
-        separate_mod = importlib.import_module(
-            "50_train_separate_stats_dual_head"
-        )
-        model_class = separate_mod.SeparateStatsDualHead1DCNN
-    else:
+    if architecture != "hand-only-shared-two-stream-dual-head":
         raise ValueError(f"Unsupported checkpoint architecture: {architecture}")
+    model_class = SharedDualHead1DCNN
 
     return model_class(
         checkpoint["input_dim"],
@@ -272,28 +261,19 @@ def main() -> None:
     parser.add_argument(
         "--data",
         default=str(
-            project_dir
-            / "dataset"
-            / "dataset_1955_recent8_updated_20260905_hand_only.npz"
+            project_dir / "data" / "processed" / "witeck_g1_g24_mobile_v1.npz"
         ),
     )
     parser.add_argument(
         "--checkpoint",
         default=str(
-            project_dir
-            / "output"
-            / "shared_dual_head"
-            / "seed_40"
-            / "shared_dual_head.pt"
+            project_dir / "output" / "final_model" / "shared_dual_head.pt"
         ),
     )
     parser.add_argument(
         "--output-dir",
         default=str(
-            project_dir
-            / "output"
-            / "shared_dual_head_eval"
-            / "seed_40"
+            project_dir / "output" / "final_evaluation"
         ),
     )
     parser.add_argument("--enroll", type=int, default=None)

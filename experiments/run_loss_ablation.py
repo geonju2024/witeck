@@ -36,7 +36,7 @@ def one_minus(value: str) -> str:
 
 
 def main() -> None:
-    project_dir = Path(__file__).resolve().parent
+    project_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data",
@@ -66,7 +66,7 @@ def main() -> None:
         run(
             [
                 args.device_python,
-                "47_train_metric_hardneg.py",
+                "train_hard_negative_model.py",
                 "--data",
                 args.data,
                 "--output-dir",
@@ -85,7 +85,7 @@ def main() -> None:
         run(
             [
                 args.device_python,
-                "46_evaluate_shared_dual_head_unseen_g5.py",
+                "evaluate_unseen_gesture.py",
                 "--data",
                 args.data,
                 "--checkpoint",

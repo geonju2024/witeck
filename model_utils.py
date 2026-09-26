@@ -1,5 +1,5 @@
 """
-two_stage_common.py
+model_utils.py
 
 Shared definitions for the two-stage experiment.
 

@@ -2,9 +2,9 @@ import numpy as np
 from pathlib import Path
 from collections import Counter
 
-BASE_PATH = Path("dataset_1955_p09_retake_hand_only_20260923.npz")
-AH_PATH = Path("dataset_AH650_G6_G24_hand_only_th03.npz")
-OUTPUT_PATH = Path("dataset_G1_G24_hand_only_2902_20260923.npz")
+BASE_PATH = Path("data/processed/witeck_g1_g5_hand_only_v1.npz")
+AH_PATH = Path("data/processed/ah650_g6_g24_hand_only_v1.npz")
+OUTPUT_PATH = Path("data/processed/witeck_g1_g24_merged_v1.npz")
 
 
 def main():

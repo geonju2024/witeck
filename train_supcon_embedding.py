@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from two_stage_common import (
+from model_utils import (
     apply_duration_stats,
     apply_sequence_stats,
     file_sha256,
@@ -28,7 +28,7 @@ from two_stage_common import (
 )
 
 
-base = importlib.import_module("08_train_embedding")
+base = importlib.import_module("train_embedding_baseline")
 Embedding1DCNN = base.Embedding1DCNN
 TRAIN_USERS = base.TRAIN_USERS
 UNSEEN_USERS = base.UNSEEN_USERS
@@ -210,7 +210,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data",
-        default=str(project_dir / "dataset" / "dataset_1955_recent8_updated_20260905.npz"),
+        default=str(project_dir / "data" / "processed" / "witeck_g1_g5_hand_only_v1.npz"),
     )
     parser.add_argument(
         "--output-dir",

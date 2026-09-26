@@ -1,7 +1,7 @@
 """Train the WITECK dual-head encoder with service-aligned metric learning.
 
 This experiment intentionally keeps the model architecture from
-45_train_shared_dual_head.py unchanged.  It changes only the training problem:
+shared_dual_head_model.py unchanged.  It changes only the training problem:
 
 * batches contain user/gesture positives and hard negatives on purpose;
 * both heads use supervised contrastive and batch-hard triplet losses;
@@ -10,7 +10,7 @@ This experiment intentionally keeps the model architecture from
 * P08-P10 remain untouched for the final evaluator.
 
 The unchanged architecture means checkpoints produced here can be evaluated by
-46_evaluate_shared_dual_head.py (or its unseen-G5 variant).
+evaluate_baseline_model.py (or its unseen-G5 variant).
 """
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 
-train_base = importlib.import_module("45_train_shared_dual_head")
-legacy = importlib.import_module("16_train_supcon_embedding")
-base = importlib.import_module("08_train_embedding")
-common = importlib.import_module("two_stage_common")
+train_base = importlib.import_module("shared_dual_head_model")
+legacy = importlib.import_module("train_supcon_embedding")
+base = importlib.import_module("train_embedding_baseline")
+common = importlib.import_module("model_utils")
 
 SharedDualHead1DCNN = train_base.SharedDualHead1DCNN
 DEFAULT_TRAIN_USERS = list(legacy.TRAIN_USERS)
@@ -498,7 +498,7 @@ def format_epoch(prefix: str, values: dict[str, float]) -> str:
 
 
 def main() -> None:
-    project_dir = Path(__file__).resolve().parent
+    project_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data",

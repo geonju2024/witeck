@@ -32,9 +32,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-legacy = importlib.import_module("16_train_supcon_embedding")
-base = importlib.import_module("08_train_embedding")
-common = importlib.import_module("two_stage_common")
+legacy = importlib.import_module("train_supcon_embedding")
+base = importlib.import_module("train_embedding_baseline")
+common = importlib.import_module("model_utils")
 
 DEFAULT_TRAIN_USERS = list(legacy.TRAIN_USERS)
 DEFAULT_UNSEEN_USERS = list(legacy.UNSEEN_USERS)
@@ -344,7 +344,7 @@ def build_user_validation_scores(
       different user + same gesture in latest available session
 
     This mirrors the old authentication calibration, but does not rely on
-    hard-coded TRAIN_USERS inside 08_train_embedding.py.
+    hard-coded TRAIN_USERS inside train_embedding_baseline.py.
     """
 
     performer = meta["performer"]
@@ -591,17 +591,13 @@ def main() -> None:
     parser.add_argument(
         "--data",
         default=str(
-            project_dir
-            / "dataset"
-            / "dataset_1955_recent8_updated_20260905_hand_only.npz"
+            project_dir / "data" / "processed" / "witeck_g1_g5_hand_only_v1.npz"
         ),
     )
     parser.add_argument(
         "--output-dir",
         default=str(
-            project_dir
-            / "output"
-            / "shared_dual_head"
+            project_dir / "output" / "baseline_model"
         ),
     )
     parser.add_argument("--epochs", type=int, default=50)
@@ -986,7 +982,7 @@ def main() -> None:
                 "accept = gesture_score >= gesture_threshold AND user_score >= user_threshold",
                 "",
                 "NOTE: final unseen-user/unseen-gesture evaluation belongs in",
-                "46_evaluate_shared_dual_head.py and must not tune these thresholds.",
+                "evaluate_final_model.py and must not tune these thresholds.",
             ]
         )
         + "\n",

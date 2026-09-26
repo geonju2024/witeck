@@ -120,7 +120,7 @@ def build_hand_features(payload: Mapping[str, Any]) -> tuple[np.ndarray, float]:
     """Convert mobile landmark payload to ``features[32,127], duration_sec``.
 
     The payload may use the JSON schema produced by
-    ``09_extract_AH650_mobile_landmarks_cpu.py`` or the equivalent app schema.
+    ``extract_mobile_landmarks.py`` or the equivalent app schema.
     Undetected frames may be omitted, but every detected frame must retain its
     original frame index and timestamp.
     """
